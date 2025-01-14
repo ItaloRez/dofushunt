@@ -4,7 +4,7 @@ A quick app to ease with dofus 3.0 treasure hunts without
 depending on dofusdb closed datas
 
 -----
-
+## Experience immediate and responsive treasure hunting
 [dofhunt.webm](https://github.com/user-attachments/assets/0b323ced-9469-4675-82e9-8432f80b1db7)
 
 ## Multilang support
