@@ -10,8 +10,6 @@ import (
 	"log"
 	"strings"
 	"time"
-	"math"
-	"math/rand"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 	g "github.com/AllenDang/giu"
@@ -342,51 +340,6 @@ func UpdateClues() {
 	}
 }
 
-// Ponto para definir coordenadas
-type Point struct {
-	X, Y float64
-}
-
-// Função para interpolar a curva de Bézier
-func bezier(p0, p1, p2, p3 Point, t float64) Point {
-	x := math.Pow(1-t, 3)*p0.X +
-		3*math.Pow(1-t, 2)*t*p1.X +
-		3*(1-t)*math.Pow(t, 2)*p2.X +
-		math.Pow(t, 3)*p3.X
-
-	y := math.Pow(1-t, 3)*p0.Y +
-		3*math.Pow(1-t, 2)*t*p1.Y +
-		3*(1-t)*math.Pow(t, 2)*p2.Y +
-		math.Pow(t, 3)*p3.Y
-
-	return Point{x, y}
-}
-
-// Gera uma posição aleatória perto de um ponto
-func randomPointNear(baseX, baseY, rangeX, rangeY int) Point {
-	rand.Seed(time.Now().UnixNano())
-	return Point{
-		X: float64(baseX + rand.Intn(rangeX) - rangeX/2),
-		Y: float64(baseY + rand.Intn(rangeY) - rangeY/2),
-	}
-}
-
-// Move o mouse ao longo da curva de Bézier
-func moveMouseBezier(start, end Point) {
-	// Define pontos de controle aleatórios entre start e end
-	ctrl1 := randomPointNear(int(start.X), int(start.Y), 100, 100)
-	ctrl2 := randomPointNear(int(end.X), int(end.Y), 100, 100)
-
-	// Itera ao longo da curva de Bézier
-	steps := 100
-	for i := 0; i <= steps; i++ {
-		t := float64(i) / float64(steps)
-		pos := bezier(start, ctrl1, ctrl2, end, t)
-		robotgo.Move(int(pos.X), int(pos.Y))
-		time.Sleep(10 * time.Millisecond) // Pausa entre os movimentos
-	}
-}
-
 func ResetClues(message string) {
 	curDir = ClueDirectionNone
 	curClues = []string{}
@@ -403,7 +356,7 @@ func TravelNextClue() {
 		return
 	}
 	travel := pos.TravelCommand()
-	
+
 	// imgui.LogToClipboard()
 	// imgui.LogText(travel)
 	// imgui.LogFinish()
@@ -427,7 +380,7 @@ func TravelNextClue() {
 		return
 	}
 	robotgo.ActivePid(fpid[0])
-	time.Sleep(500 * time.Millisecond) 
+	time.Sleep(500 * time.Millisecond)
 
 	// Simula pressionar a tecla "Espaço"
 	robotgo.KeyTap("space")
@@ -435,7 +388,7 @@ func TravelNextClue() {
 
 	// Digita o texto
 	robotgo.TypeStr(travel)
-	time.Sleep(500 * time.Millisecond) 
+	time.Sleep(500 * time.Millisecond)
 	log.Println("Digitou o texto")
 
 	// Pressiona Enter duas vezes com atraso
@@ -446,8 +399,6 @@ func TravelNextClue() {
 }
 
 func main() {
-	
-
 	wnd = g.NewMasterWindow("DofHunt", 380, 263, g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFrameless|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent) //g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent)
 	wnd.SetTargetFPS(60)
 	wnd.SetBgColor(color.RGBA{0, 0, 0, 0})
@@ -458,5 +409,4 @@ func main() {
 	icon16Texture.SetSurfaceFromRGBA(rgbaIcon16, false)
 	wnd.SetPos(300, 300)
 	wnd.Run(loop)
-
 }

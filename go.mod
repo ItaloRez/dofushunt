@@ -1,4 +1,4 @@
-module github.com/cjbrigato/dofhunt
+module dofhunt
 
 go 1.23.3
 
