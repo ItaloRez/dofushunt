@@ -8,6 +8,8 @@ import (
 	"image/color"
 	"image/png"
 	"log"
+	"math/rand"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -69,6 +71,7 @@ var (
 	headerSplashRgba   *image.RGBA
 	splashTexture      = &g.ReflectiveBoundTexture{}
 	icon16Texture      = &g.ReflectiveBoundTexture{}
+	pricePreviewTexture = &g.ReflectiveBoundTexture{}
 	curSelectedIndex   = int32(-1)
 	filterText         = ""
 	wnd                *g.MasterWindow
@@ -77,7 +80,15 @@ var (
 	initialized        = false
 	shouldFilterFocus  = false
 	shouldListboxFocus = false
+	itemsToScan        = ""
+	scanResults        = []ScanResult{}
+	isScanning         = false
 )
+
+type ScanResult struct {
+	Name   string
+	Prices []PriceTier
+}
 
 func framelessWindowMoveWidget(widget g.Widget) *g.CustomWidget {
 	return g.Custom(func() {
@@ -168,6 +179,10 @@ func filterClues(filter *string) {
 }
 
 func loop() {
+	if calibActive {
+		calibratorLoop()
+		return
+	}
 
 	imgui.PushStyleVarVec2(imgui.StyleVarCellPadding, imgui.Vec2{1.0, 1.0})
 	imgui.PushStyleVarVec2(imgui.StyleVarSeparatorTextAlign, imgui.Vec2{1.0, 1.0})
@@ -192,118 +207,168 @@ func loop() {
 		g.SingleWindow().Flags(
 			g.WindowFlags(imgui.WindowFlagsNoTitleBar)|
 				g.WindowFlags(imgui.WindowFlagsNoCollapse)|
-				g.WindowFlags(imgui.WindowFlagsNoScrollbar)|
 				g.WindowFlags(imgui.WindowFlagsNoMove)|
 				g.WindowFlags(imgui.WindowFlagsNoResize)|
 				g.WindowFlags(imgui.WindowFlagsNoNav),
 		).Layout(
 			titleBarLayout(),
-			headerLayout(),
-			g.Row(
-				g.Child().Flags(g.WindowFlagsNoNav).Size(115, 100).Layout(
+			g.TabBar().TabItems(
+				g.TabItem("Hunt").Layout(
+					headerLayout(),
+					g.Row(
+						g.Child().Flags(g.WindowFlagsNoNav).Size(115, 100).Layout(
+							g.Row(g.Custom(func() {
+								g.Dummy(22.0, 0).Build()
+								if curDir != ClueDirectionUp {
+									imgui.SameLine()
+									g.ArrowButton(g.DirectionUp).OnClick(func() {
+										curDir = ClueDirectionUp
+										UpdateClues()
+									}).Build()
+								} else {
+									g.Label("").Build()
+								}
+							})),
+							g.Row(g.Custom(func() {
+								if curDir != ClueDirectionLeft {
+									g.ArrowButton(g.DirectionLeft).OnClick(func() {
+										curDir = ClueDirectionLeft
+										UpdateClues()
+									}).Build()
+								} else {
+									g.Dummy(22.0, 0).Build()
+								}
+								imgui.SameLine()
+								if curDir != ClueDirectionNone {
+									g.Button("    ").OnClick(func() {
+										ResetClues(SELECTED_CLUE_RESET)
+									}).Build()
+								} else {
+									g.Dummy(21.0, 0).Build()
+								}
+								imgui.SameLine()
+								if curDir != ClueDirectionRight {
+									g.ArrowButton(g.DirectionRight).OnClick(func() {
+										curDir = ClueDirectionRight
+										UpdateClues()
+									}).Build()
+								} else {
+									g.Dummy(21.0, 0).Build()
+								}
+							})),
+							g.Row(g.Custom(func() {
+								g.Dummy(22.0, 0).Build()
+								if curDir != ClueDirectionDown {
+									imgui.SameLine()
+									g.ArrowButton(g.DirectionDown).OnClick(func() {
+										curDir = ClueDirectionDown
+										UpdateClues()
+									}).Build()
+								} else {
+									g.Label("").Build()
+								}
+							})),
+							g.Row(g.Custom(func() {
+								if canConfirm {
+									g.Button("Confirm Clue").OnClick(TravelNextClue).Build()
+								} else {
+									g.Label("").Build()
+								}
+							})),
+						),
+						g.Custom(func() {
+							if shouldListboxFocus {
+								imgui.SetNextWindowFocus()
+								shouldListboxFocus = false
+							} else {
+								if g.IsKeyPressed(g.KeyEscape) {
+									shouldFilterFocus = true
+								}
+							}
+							onChange := func(selectedIndex int) {
+								if g.IsKeyPressed(g.KeyEnter) {
+									curSelectedIndex = int32(selectedIndex)
+									if len(curFilteredClues) > int(selectedIndex) {
+										curSelectedClue = curFilteredClues[selectedIndex]
+										TravelNextClue()
+									}
+								}
+							}
+							onDclick := func(selectedIndex int) {
+								curSelectedIndex = int32(selectedIndex)
+								if len(curFilteredClues) > int(selectedIndex) {
+									curSelectedClue = curFilteredClues[selectedIndex]
+									TravelNextClue()
+								}
+							}
+							g.ListBox(curFilteredClues).Size(-1, 100).OnChange(onChange).SelectedIndex(&curSelectedIndex).OnDClick(onDclick).Build()
+							if int(curSelectedIndex) >= 0 && len(curFilteredClues) > int(curSelectedIndex) {
+								curSelectedClue = curFilteredClues[curSelectedIndex]
+							} else {
+								curSelectedIndex = -1
+							}
+						}),
+					),
 					g.Row(g.Custom(func() {
-						g.Dummy(22.0, 0).Build()
-						if curDir != ClueDirectionUp {
-							imgui.SameLine()
-							g.ArrowButton(g.DirectionUp).OnClick(func() {
-								curDir = ClueDirectionUp
-								UpdateClues()
-							}).Build()
-						} else {
-							g.Label("").Build()
-						}
+						imgui.PushStyleVarVec2(imgui.StyleVarSeparatorTextAlign, imgui.Vec2{1.0, 1.0})
+						imgui.PushStyleVarVec2(imgui.StyleVarSeparatorTextPadding, imgui.Vec2{20.0, 0.0})
+						imgui.SeparatorText("History")
+						imgui.PopStyleVarV(2)
 					})),
-					g.Row(g.Custom(func() {
-						if curDir != ClueDirectionLeft {
-							g.ArrowButton(g.DirectionLeft).OnClick(func() {
-								curDir = ClueDirectionLeft
-								UpdateClues()
-							}).Build()
-						} else {
-							g.Dummy(22.0, 0).Build()
+					g.Custom(func() {
+						if len(TravelHistory.GetEntries()) > 0 {
+							TravelHistory.Table().Build()
 						}
-						imgui.SameLine()
-						if curDir != ClueDirectionNone {
-							g.Button("    ").OnClick(func() {
-								ResetClues(SELECTED_CLUE_RESET)
-							}).Build()
-						} else {
-							g.Dummy(21.0, 0).Build()
-						}
-						imgui.SameLine()
-						if curDir != ClueDirectionRight {
-							g.ArrowButton(g.DirectionRight).OnClick(func() {
-								curDir = ClueDirectionRight
-								UpdateClues()
-							}).Build()
-						} else {
-							g.Dummy(21.0, 0).Build()
-						}
-					})),
-					g.Row(g.Custom(func() {
-						g.Dummy(22.0, 0).Build()
-						if curDir != ClueDirectionDown {
-							imgui.SameLine()
-							g.ArrowButton(g.DirectionDown).OnClick(func() {
-								curDir = ClueDirectionDown
-								UpdateClues()
-							}).Build()
-						} else {
-							g.Label("").Build()
-						}
-					})),
-					g.Row(g.Custom(func() {
-						if canConfirm {
-							g.Button("Confirm Clue").OnClick(TravelNextClue).Build()
-						} else {
-							g.Label("").Build()
-						}
-					})),
+					}),
 				),
-				g.Custom(func() {
-					if shouldListboxFocus {
-						imgui.SetNextWindowFocus()
-						shouldListboxFocus = false
-					} else {
-						if g.IsKeyPressed(g.KeyEscape) {
-							shouldFilterFocus = true
+				g.TabItem("Market").Layout(
+					g.Label("Items (one per line):"),
+					g.InputTextMultiline(&itemsToScan).Size(-1, 80),
+					g.Row(
+						g.Button("Calibrate Search").OnClick(func() { go GlobalScanner.CalibrateSearchBar() }),
+						g.Button("Calibrate 1st Result").OnClick(func() { go GlobalScanner.CalibrateFirstResult() }),
+						g.Button("Calibrate 2nd Result").OnClick(func() { go GlobalScanner.CalibrateSecondResult() }),
+					),
+					g.Row(
+						g.Button("Calibrate Price").OnClick(func() { go StartPriceCalibration() }),
+						g.Button("Calibrate Name").OnClick(func() { go StartItemNameCalibration() }),
+					),
+					g.Row(
+						g.Button("Abrir Permissões de Acessibilidade").OnClick(func() {
+							exec.Command("open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility").Run()
+						}),
+						g.Button("Abrir Permissões de Gravação de Tela").OnClick(func() {
+							exec.Command("open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture").Run()
+						}),
+					),
+					g.Row(
+						g.Button("Start Scan").Disabled(isScanning || !GlobalScanner.IsCalibrated).OnClick(func() {
+							go startMarketScan()
+						}),
+						g.Button("Clear Results").OnClick(func() {
+							scanResults = []ScanResult{}
+						}),
+					),
+					g.Custom(func() {
+						// Preview da imagem capturada
+						if GlobalScanner.IsCalibrated {
+							imgui.SeparatorText("Preview da Captura")
+							pricePreviewTexture.ToImageWidget().Scale(1.0, 1.0).Build()
 						}
-					}
-					onChange := func(selectedIndex int) {
-						if g.IsKeyPressed(g.KeyEnter) {
-							curSelectedIndex = int32(selectedIndex)
-							if len(curFilteredClues) > int(selectedIndex) {
-								curSelectedClue = curFilteredClues[selectedIndex]
-								TravelNextClue()
+					}),
+					g.Custom(func() {
+						if len(scanResults) > 0 {
+							imgui.SeparatorText("Results")
+							for _, res := range scanResults {
+								g.Label(res.Name).Build()
+								for _, t := range res.Prices {
+									g.Label(fmt.Sprintf("  x%-6d %d kamas", t.Qty, t.Price)).Build()
+								}
 							}
 						}
-					}
-					onDclick := func(selectedIndex int) {
-						curSelectedIndex = int32(selectedIndex)
-						if len(curFilteredClues) > int(selectedIndex) {
-							curSelectedClue = curFilteredClues[selectedIndex]
-							TravelNextClue()
-						}
-					}
-					g.ListBox(curFilteredClues).Size(-1, 100).OnChange(onChange).SelectedIndex(&curSelectedIndex).OnDClick(onDclick).Build()
-					if int(curSelectedIndex) >= 0 && len(curFilteredClues) > int(curSelectedIndex) {
-						curSelectedClue = curFilteredClues[curSelectedIndex]
-					} else {
-						curSelectedIndex = -1
-					}
-				}),
+					}),
+				),
 			),
-			g.Row(g.Custom(func() {
-				imgui.PushStyleVarVec2(imgui.StyleVarSeparatorTextAlign, imgui.Vec2{1.0, 1.0})
-				imgui.PushStyleVarVec2(imgui.StyleVarSeparatorTextPadding, imgui.Vec2{20.0, 0.0})
-				imgui.SeparatorText("History")
-				imgui.PopStyleVarV(2)
-			})),
-			g.Custom(func() {
-				if len(TravelHistory.GetEntries()) > 0 {
-					TravelHistory.Table().Build()
-				}
-			}),
 		)
 	}
 	g.PopStyleColor()
@@ -398,8 +463,87 @@ func TravelNextClue() {
 	robotgo.KeyTap("enter")
 }
 
+func startMarketScan() {
+	if isScanning {
+		return
+	}
+	isScanning = true
+	defer func() { isScanning = false }()
+
+	lines := strings.Split(itemsToScan, "\n")
+	for _, line := range lines {
+		searched := strings.TrimSpace(line)
+		if searched == "" {
+			continue
+		}
+
+		GlobalScanner.SearchItem(searched)
+		GlobalScanner.ClickFirstResult()
+		scanResult := captureResult(searched)
+		if scanResult == nil {
+			continue
+		}
+		scanResults = append(scanResults, *scanResult)
+		g.Update()
+
+		// Se o nome encontrado não bate com o buscado e há segundo resultado calibrado,
+		// captura o segundo item também.
+		if GlobalScanner.HasSecondResult && GlobalScanner.HasNameCalib &&
+			len(scanResult.Prices) > 0 && !namesMatch(searched, scanResult.Name) {
+			GlobalScanner.ClickSecondResult()
+			scanResult2 := captureResult(searched)
+			if scanResult2 != nil {
+				scanResults = append(scanResults, *scanResult2)
+				g.Update()
+			}
+		}
+	}
+}
+
+// captureResult lê nome e todos os tiers de preço do item atualmente selecionado.
+// O parâmetro searched é usado como fallback de nome quando o OCR de nome não está calibrado.
+// Tenta até 2 vezes clicar no item caso o nome não apareça.
+func captureResult(searched string) *ScanResult {
+	capturedName := searched
+	if GlobalScanner.HasNameCalib {
+		const maxAttempts = 2
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			n, err := GlobalScanner.CaptureItemName()
+			if err != nil {
+				log.Printf("Attempt %d: error capturing name for %s: %v", attempt, searched, err)
+			} else if n != "" {
+				capturedName = n
+				break
+			}
+			if attempt < maxAttempts {
+				log.Printf("Attempt %d: name empty, tentando segundo resultado...", attempt)
+				if GlobalScanner.HasSecondResult {
+					GlobalScanner.ClickSecondResult()
+				} else {
+					GlobalScanner.ClickFirstResult()
+				}
+			}
+		}
+	}
+
+	tiers, err := GlobalScanner.CapturePrices()
+	if err != nil {
+		log.Printf("Error scanning %s: %v", searched, err)
+		return nil
+	}
+
+	return &ScanResult{Name: capturedName, Prices: tiers}
+}
+
+// namesMatch compara dois nomes ignorando maiúsculas/minúsculas e espaços extras.
+func namesMatch(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
 func main() {
-	wnd = g.NewMasterWindow("DofHunt", 380, 263, g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFrameless|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent) //g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent)
+	rand.Seed(time.Now().UnixNano())
+	LoadConfig() // Carrega calibrações salvas
+	wnd = g.NewMasterWindow("DofHunt", 380, 263, g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFrameless|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent)
 	wnd.SetTargetFPS(60)
 	wnd.SetBgColor(color.RGBA{0, 0, 0, 0})
 	rgbaIcon, _ = DecodeAppIcon()

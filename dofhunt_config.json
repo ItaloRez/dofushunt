@@ -1,0 +1,42 @@
+{
+  "search_bar": {
+    "x": 542,
+    "y": 283
+  },
+  "first_result": {
+    "x": 744,
+    "y": 322
+  },
+  "second_result": {
+    "x": 734,
+    "y": 380
+  },
+  "price_area": {
+    "x1": 119,
+    "y1": 426,
+    "x2": 303,
+    "y2": 459
+  },
+  "qty_col_rect": {
+    "x1": 120,
+    "y1": 426,
+    "x2": 180,
+    "y2": 460
+  },
+  "price_col_rect": {
+    "x1": 216,
+    "y1": 427,
+    "x2": 303,
+    "y2": 460
+  },
+  "item_name_rect": {
+    "x1": 142,
+    "y1": 275,
+    "x2": 416,
+    "y2": 303
+  },
+  "is_calibrated": true,
+  "has_name_calib": true,
+  "has_second_result": true,
+  "has_split_calib": true
+}
