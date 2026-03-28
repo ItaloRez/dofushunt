@@ -1,0 +1,3 @@
+- quando for mais de uma palavra dar um ctrl v ai inves de digitar
+- quando não item aparecer ao clicar ou nao mudar de item, fechar o item, fecha a busca e buscar novamente
+- verificar o tipo do item, se for consumivel tem que estar nos mapas x, se for recurso nos mapas y, se for equipamento nos mapas z

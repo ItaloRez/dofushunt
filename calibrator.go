@@ -106,7 +106,7 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 // StartFullCalibration encadeia todos os passos de calibração em sequência.
 func StartFullCalibration() {
 	calibStepNum = 0
-	calibTotalSteps = 7
+	calibTotalSteps = 8
 	runCalibStep1()
 }
 
@@ -144,10 +144,10 @@ func runCalibStep3() {
 
 func runCalibStep4() {
 	calibStepNum = 4
-	StartCalibrationPoint("Fechar Item — clique no botão de fechar o item", func(pt image.Point) {
-		GlobalScanner.CloseItem = pt
-		GlobalScanner.HasCloseItem = true
-		log.Printf("Fechar item calibrado: %v", pt)
+	StartCalibrationPoint("3º Resultado — clique sobre o terceiro item da lista", func(pt image.Point) {
+		GlobalScanner.ThirdResult = pt
+		GlobalScanner.HasThirdResult = true
+		log.Printf("3º resultado calibrado: %v", pt)
 		SaveConfig()
 		runCalibStep5()
 	})
@@ -155,27 +155,38 @@ func runCalibStep4() {
 
 func runCalibStep5() {
 	calibStepNum = 5
-	StartCalibration("Coluna QUANTIDADE — arraste sobre a célula '1' (1ª linha)", func(r image.Rectangle) {
-		GlobalScanner.QtyColRect = r
-		log.Printf("Coluna quantidade calibrada: %v", r)
+	StartCalibrationPoint("Fechar Item — clique no botão de fechar o item", func(pt image.Point) {
+		GlobalScanner.CloseItem = pt
+		GlobalScanner.HasCloseItem = true
+		log.Printf("Fechar item calibrado: %v", pt)
+		SaveConfig()
 		runCalibStep6()
 	})
 }
 
 func runCalibStep6() {
 	calibStepNum = 6
-	StartCalibration("Coluna PREÇO — arraste sobre o preço da 1ª linha", func(r image.Rectangle) {
-		GlobalScanner.PriceColRect = r
-		GlobalScanner.HasSplitCalib = true
-		GlobalScanner.IsCalibrated = true
-		log.Printf("Coluna preço calibrada: %v", r)
-		SaveConfig()
+	StartCalibration("Coluna QUANTIDADE — arraste sobre a célula '1' (1ª linha)", func(r image.Rectangle) {
+		GlobalScanner.QtyColRect = r
+		log.Printf("Coluna quantidade calibrada: %v", r)
 		runCalibStep7()
 	})
 }
 
 func runCalibStep7() {
 	calibStepNum = 7
+	StartCalibration("Coluna PREÇO — arraste sobre o preço da 1ª linha", func(r image.Rectangle) {
+		GlobalScanner.PriceColRect = r
+		GlobalScanner.HasSplitCalib = true
+		GlobalScanner.IsCalibrated = true
+		log.Printf("Coluna preço calibrada: %v", r)
+		SaveConfig()
+		runCalibStep8()
+	})
+}
+
+func runCalibStep8() {
+	calibStepNum = 8
 	StartCalibration("Nome do Item — arraste sobre a área do nome do item", func(r image.Rectangle) {
 		GlobalScanner.ItemNameRect = r
 		GlobalScanner.HasNameCalib = true
@@ -296,6 +307,7 @@ func calibratorLoop() {
 				{"Busca",       GlobalScanner.HasSearchBar},
 				{"1º Result",   GlobalScanner.FirstResult != image.Point{}},
 				{"2º Result",   GlobalScanner.HasSecondResult},
+				{"3º Result",   GlobalScanner.HasThirdResult},
 				{"Fechar Item", GlobalScanner.HasCloseItem},
 				{"Quantidade",  GlobalScanner.HasSplitCalib},
 				{"Preço",       GlobalScanner.HasSplitCalib},

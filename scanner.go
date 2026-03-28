@@ -24,6 +24,7 @@ type MarketScanner struct {
 	SearchBarRect   image.Rectangle // área do campo de busca (para OCR + clique)
 	FirstResult     image.Point
 	SecondResult    image.Point
+	ThirdResult     image.Point
 	CloseItem       image.Point
 	PriceAreaRect   image.Rectangle // fallback (sem split)
 	QtyColRect      image.Rectangle // coluna de quantidade (split)
@@ -32,6 +33,7 @@ type MarketScanner struct {
 	IsCalibrated    bool
 	HasNameCalib    bool
 	HasSecondResult bool
+	HasThirdResult  bool
 	HasSplitCalib   bool
 	HasCloseItem    bool
 	HasSearchBar    bool
@@ -144,6 +146,13 @@ func (s *MarketScanner) ClickFirstResult() {
 func (s *MarketScanner) ClickSecondResult() {
 	log.Println("Clicking second result")
 	MoveHumanLike(s.SecondResult.X, s.SecondResult.Y)
+	ClickHumanLike()
+	time.Sleep(500 * time.Millisecond)
+}
+
+func (s *MarketScanner) ClickThirdResult() {
+	log.Println("Clicking third result")
+	MoveHumanLike(s.ThirdResult.X, s.ThirdResult.Y)
 	ClickHumanLike()
 	time.Sleep(500 * time.Millisecond)
 }

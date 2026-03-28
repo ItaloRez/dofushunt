@@ -13,6 +13,7 @@ type ScannerConfig struct {
 	SearchBarRect   *RectJSON  `json:"search_bar_rect,omitempty"`
 	FirstResult     *PointJSON `json:"first_result,omitempty"`
 	SecondResult    *PointJSON `json:"second_result,omitempty"`
+	ThirdResult     *PointJSON `json:"third_result,omitempty"`
 	CloseItem       *PointJSON `json:"close_item,omitempty"`
 	PriceArea       *RectJSON  `json:"price_area,omitempty"`
 	QtyColRect      *RectJSON  `json:"qty_col_rect,omitempty"`
@@ -21,9 +22,13 @@ type ScannerConfig struct {
 	IsCalibrated    bool       `json:"is_calibrated"`
 	HasNameCalib    bool       `json:"has_name_calib"`
 	HasSecondResult bool       `json:"has_second_result"`
+	HasThirdResult  bool       `json:"has_third_result"`
 	HasSplitCalib   bool       `json:"has_split_calib"`
 	HasCloseItem    bool       `json:"has_close_item"`
 	HasSearchBar    bool       `json:"has_search_bar"`
+	Server          string     `json:"server,omitempty"`
+	WindowX         int        `json:"window_x,omitempty"`
+	WindowY         int        `json:"window_y,omitempty"`
 }
 
 type PointJSON struct {
@@ -84,6 +89,10 @@ func SaveConfig() {
 		cfg.SecondResult = &PointJSON{X: GlobalScanner.SecondResult.X, Y: GlobalScanner.SecondResult.Y}
 		cfg.HasSecondResult = true
 	}
+	if GlobalScanner.HasThirdResult {
+		cfg.ThirdResult = &PointJSON{X: GlobalScanner.ThirdResult.X, Y: GlobalScanner.ThirdResult.Y}
+		cfg.HasThirdResult = true
+	}
 	if GlobalScanner.HasCloseItem {
 		cfg.CloseItem = &PointJSON{X: GlobalScanner.CloseItem.X, Y: GlobalScanner.CloseItem.Y}
 		cfg.HasCloseItem = true
@@ -102,6 +111,11 @@ func SaveConfig() {
 	if GlobalScanner.HasNameCalib {
 		r := GlobalScanner.ItemNameRect
 		cfg.ItemNameRect = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
+	}
+
+	cfg.Server = dbServer
+	if wnd != nil {
+		cfg.WindowX, cfg.WindowY = wnd.GetPos()
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -143,6 +157,9 @@ func LoadConfig() {
 	if cfg.SecondResult != nil {
 		GlobalScanner.SecondResult = image.Point{X: cfg.SecondResult.X, Y: cfg.SecondResult.Y}
 	}
+	if cfg.ThirdResult != nil {
+		GlobalScanner.ThirdResult = image.Point{X: cfg.ThirdResult.X, Y: cfg.ThirdResult.Y}
+	}
 	if cfg.CloseItem != nil {
 		GlobalScanner.CloseItem = image.Point{X: cfg.CloseItem.X, Y: cfg.CloseItem.Y}
 	}
@@ -161,9 +178,27 @@ func LoadConfig() {
 	GlobalScanner.IsCalibrated = cfg.IsCalibrated
 	GlobalScanner.HasNameCalib = cfg.HasNameCalib
 	GlobalScanner.HasSecondResult = cfg.HasSecondResult
+	GlobalScanner.HasThirdResult = cfg.HasThirdResult
 	GlobalScanner.HasSplitCalib = cfg.HasSplitCalib
 	GlobalScanner.HasCloseItem = cfg.HasCloseItem
 	GlobalScanner.HasSearchBar = cfg.HasSearchBar
+	if cfg.Server != "" {
+		dbServer = cfg.Server
+		for i, entry := range ServerList {
+			if ServerName(entry) == cfg.Server {
+				dbServerIndex = int32(i)
+				break
+			}
+		}
+	}
 
-	log.Printf("Config carregado: %s (price=%v name=%v)", path, cfg.IsCalibrated, cfg.HasNameCalib)
+	loadedWindowX = cfg.WindowX
+	loadedWindowY = cfg.WindowY
+	log.Printf("Config carregado: %s (price=%v name=%v server=%s pos=%d,%d)", path, cfg.IsCalibrated, cfg.HasNameCalib, cfg.Server, cfg.WindowX, cfg.WindowY)
+}
+
+var loadedWindowX, loadedWindowY int
+
+func savedWindowPos() (int, int) {
+	return loadedWindowX, loadedWindowY
 }

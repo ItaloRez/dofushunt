@@ -82,6 +82,8 @@ var (
 	itemsToScan        = ""
 	scanResults        = []ScanResult{}
 	isScanning         = false
+	dbServer           = ""
+	dbServerIndex      = int32(-1)
 )
 
 type ScanResult struct {
@@ -93,6 +95,7 @@ func framelessWindowMoveWidget(widget g.Widget) *g.CustomWidget {
 	return g.Custom(func() {
 		if isMovingFrame && !g.IsMouseDown(g.MouseButtonLeft) {
 			isMovingFrame = false
+			SaveConfig()
 			return
 		}
 
@@ -324,6 +327,17 @@ func loop() {
 					g.Label("Items (one per line):"),
 					g.InputTextMultiline(&itemsToScan).Size(-1, 60),
 					g.Row(
+						g.Label("Servidor:"),
+						g.Combo("##server", dbServer, ServerList, &dbServerIndex).
+							Size(180).
+							OnChange(func() {
+								if int(dbServerIndex) >= 0 && int(dbServerIndex) < len(ServerList) {
+									dbServer = ServerName(ServerList[dbServerIndex])
+									SaveConfig()
+								}
+							}),
+					),
+					g.Row(
 						g.Button("Calibrar").Disabled(calibActive).OnClick(func() {
 							go StartFullCalibration()
 						}),
@@ -467,34 +481,86 @@ func startMarketScan() {
 	defer func() { isScanning = false }()
 
 	lines := strings.Split(itemsToScan, "\n")
-	prevName := ""
-	for _, line := range lines {
-		searched := strings.TrimSpace(line)
-		if searched == "" {
-			continue
-		}
 
+	// Monta fila inicial, ignorando linhas vazias.
+	var queue []string
+	for _, line := range lines {
+		if s := strings.TrimSpace(line); s != "" {
+			queue = append(queue, s)
+		}
+	}
+
+	// retryQueue acumula itens que falharam; processados uma única vez no final.
+	var retryQueue []string
+	isRetryPass := false
+
+	processItem := func(searched, prevName string) (result *ScanResult, failed bool) {
 		GlobalScanner.SearchItem(searched)
 		GlobalScanner.ClickFirstResult()
 		scanResult := captureResult(searched, prevName, GlobalScanner.ClickFirstResult)
 		if scanResult == nil {
+			return nil, true
+		}
+
+		// Verifica se o nome capturado bate com o buscado.
+		nameOk := !GlobalScanner.HasNameCalib || namesMatch(searched, scanResult.Name)
+
+		// Tenta 2º resultado se nome não bate.
+		if !nameOk && GlobalScanner.HasSecondResult && GlobalScanner.HasNameCalib {
+			GlobalScanner.ClickSecondResult()
+			sr2 := captureResult(searched, scanResult.Name, GlobalScanner.ClickSecondResult)
+			if sr2 != nil {
+				nameOk = namesMatch(searched, sr2.Name)
+				scanResult = sr2
+			}
+		}
+
+		// Tenta 3º resultado se ainda não bateu.
+		if !nameOk && GlobalScanner.HasThirdResult && GlobalScanner.HasNameCalib {
+			GlobalScanner.ClickThirdResult()
+			sr3 := captureResult(searched, scanResult.Name, GlobalScanner.ClickThirdResult)
+			if sr3 != nil {
+				nameOk = namesMatch(searched, sr3.Name)
+				scanResult = sr3
+			}
+		}
+
+		// Se nenhum resultado bateu e ainda não é a passagem de retry, agenda para tentar depois.
+		if !nameOk && !isRetryPass {
+			log.Printf("Scan: '%s' não encontrado, agendando para retry", searched)
+			return nil, true
+		}
+
+		return scanResult, false
+	}
+
+	prevName := ""
+	for _, searched := range queue {
+		result, failed := processItem(searched, prevName)
+		if failed {
+			retryQueue = append(retryQueue, searched)
 			continue
 		}
-		scanResults = append(scanResults, *scanResult)
-		prevName = scanResult.Name
+		scanResults = append(scanResults, *result)
+		prevName = result.Name
+		go SavePricesToDB(dbServer, result.Name, result.Prices)
 		g.Update()
+	}
 
-		// Se o nome encontrado não bate com o buscado e há segundo resultado calibrado,
-		// captura o segundo item também.
-		if GlobalScanner.HasSecondResult && GlobalScanner.HasNameCalib &&
-			len(scanResult.Prices) > 0 && !namesMatch(searched, scanResult.Name) {
-			GlobalScanner.ClickSecondResult()
-			scanResult2 := captureResult(searched, prevName, GlobalScanner.ClickSecondResult)
-			if scanResult2 != nil {
-				scanResults = append(scanResults, *scanResult2)
-				prevName = scanResult2.Name
-				g.Update()
+	// Passagem de retry — uma única vez, sem reenfileirar.
+	if len(retryQueue) > 0 {
+		isRetryPass = true
+		log.Printf("Scan: iniciando retry de %d item(ns): %v", len(retryQueue), retryQueue)
+		for _, searched := range retryQueue {
+			result, _ := processItem(searched, prevName)
+			if result == nil {
+				log.Printf("Scan: retry falhou para '%s', pulando", searched)
+				continue
 			}
+			scanResults = append(scanResults, *result)
+			prevName = result.Name
+			go SavePricesToDB(dbServer, result.Name, result.Prices)
+			g.Update()
 		}
 	}
 }
@@ -508,7 +574,9 @@ func captureResult(searched, prevName string, retryClick func()) *ScanResult {
 		const maxAttempts = 2
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			n, err := GlobalScanner.CaptureItemName()
-			nameOk := err == nil && n != "" && !namesMatch(n, prevName)
+			// Para comparar com o nome anterior, usamos o match estrito (normalizado)
+			// para evitar que itens parecidos mas diferentes fiquem presos num loop de retry.
+			nameOk := err == nil && n != "" && !namesMatchStrict(n, prevName)
 			if nameOk {
 				capturedName = n
 				break
@@ -537,9 +605,56 @@ func captureResult(searched, prevName string, retryClick func()) *ScanResult {
 	return &ScanResult{Name: capturedName, Prices: tiers}
 }
 
-// namesMatch compara dois nomes ignorando maiúsculas/minúsculas e espaços extras.
+// namesMatch compara dois nomes ignorando maiúsculas/minúsculas, acentos e permite até 2 letras de diferença.
 func namesMatch(a, b string) bool {
-	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+	normA := NormalizeString(language, strings.TrimSpace(a), true)
+	normB := NormalizeString(language, strings.TrimSpace(b), true)
+	if normA == normB {
+		return true
+	}
+	return levenshtein(normA, normB) <= 2
+}
+
+// namesMatchStrict compara se dois nomes são idênticos após normalização (acentos e case).
+func namesMatchStrict(a, b string) bool {
+	return NormalizeString(language, strings.TrimSpace(a), true) == NormalizeString(language, strings.TrimSpace(b), true)
+}
+
+func levenshtein(s, t string) int {
+	if s == t {
+		return 0
+	}
+	if len(s) == 0 {
+		return len(t)
+	}
+	if len(t) == 0 {
+		return len(s)
+	}
+
+	r1 := []rune(s)
+	r2 := []rune(t)
+	len1 := len(r1)
+	len2 := len(r2)
+
+	column := make([]int, len1+1)
+	for i := 0; i <= len1; i++ {
+		column[i] = i
+	}
+
+	for j := 1; j <= len2; j++ {
+		column[0] = j
+		lastdiag := j - 1
+		for i := 1; i <= len1; i++ {
+			oldcolumni := column[i]
+			cost := 1
+			if r1[i-1] == r2[j-1] {
+				cost = 0
+			}
+			column[i] = min(column[i]+1, min(column[i-1]+1, lastdiag+cost))
+			lastdiag = oldcolumni
+		}
+	}
+	return column[len1]
 }
 
 // nudgeAndRetry move o mouse alguns pixels em direção aleatória (cima/baixo/esquerda/direita)
@@ -565,6 +680,10 @@ func main() {
 	headerSplashRgba, _ := DecodeSplashHeaderLogo()
 	splashTexture.SetSurfaceFromRGBA(headerSplashRgba, false)
 	icon16Texture.SetSurfaceFromRGBA(rgbaIcon16, false)
-	wnd.SetPos(300, 300)
+	if x, y := savedWindowPos(); x != 0 || y != 0 {
+		wnd.SetPos(x, y)
+	} else {
+		wnd.SetPos(300, 300)
+	}
 	wnd.Run(loop)
 }
