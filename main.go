@@ -9,7 +9,6 @@ import (
 	"image/png"
 	"log"
 	"math/rand"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -323,36 +322,21 @@ func loop() {
 				),
 				g.TabItem("Market").Layout(
 					g.Label("Items (one per line):"),
-					g.InputTextMultiline(&itemsToScan).Size(-1, 80),
+					g.InputTextMultiline(&itemsToScan).Size(-1, 60),
 					g.Row(
-						g.Button("Calibrate Search").OnClick(func() { go GlobalScanner.CalibrateSearchBar() }),
-						g.Button("Calibrate 1st Result").OnClick(func() { go GlobalScanner.CalibrateFirstResult() }),
-						g.Button("Calibrate 2nd Result").OnClick(func() { go GlobalScanner.CalibrateSecondResult() }),
-					),
-					g.Row(
-						g.Button("Calibrate Price").OnClick(func() { go StartPriceCalibration() }),
-						g.Button("Calibrate Name").OnClick(func() { go StartItemNameCalibration() }),
-					),
-					g.Row(
-						g.Button("Abrir Permissões de Acessibilidade").OnClick(func() {
-							exec.Command("open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility").Run()
+						g.Button("Calibrar").Disabled(calibActive).OnClick(func() {
+							go StartFullCalibration()
 						}),
-						g.Button("Abrir Permissões de Gravação de Tela").OnClick(func() {
-							exec.Command("open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture").Run()
-						}),
-					),
-					g.Row(
 						g.Button("Start Scan").Disabled(isScanning || !GlobalScanner.IsCalibrated).OnClick(func() {
 							go startMarketScan()
 						}),
-						g.Button("Clear Results").OnClick(func() {
+						g.Button("Limpar").OnClick(func() {
 							scanResults = []ScanResult{}
 						}),
 					),
 					g.Custom(func() {
-						// Preview da imagem capturada
 						if GlobalScanner.IsCalibrated {
-							imgui.SeparatorText("Preview da Captura")
+							imgui.SeparatorText("Preview")
 							pricePreviewTexture.ToImageWidget().Scale(1.0, 1.0).Build()
 						}
 					}),
@@ -463,6 +447,18 @@ func TravelNextClue() {
 	robotgo.KeyTap("enter")
 }
 
+// calibStatusLabel exibe um label colorido indicando se um passo está calibrado.
+func calibStatusLabel(name string, ok bool) {
+	if ok {
+		imgui.PushStyleColorVec4(imgui.ColText, imgui.Vec4{X: 0.3, Y: 1.0, Z: 0.3, W: 1})
+		imgui.Text("✓ " + name)
+	} else {
+		imgui.PushStyleColorVec4(imgui.ColText, imgui.Vec4{X: 1.0, Y: 0.4, Z: 0.4, W: 1})
+		imgui.Text("✗ " + name)
+	}
+	imgui.PopStyleColor()
+}
+
 func startMarketScan() {
 	if isScanning {
 		return
@@ -471,6 +467,7 @@ func startMarketScan() {
 	defer func() { isScanning = false }()
 
 	lines := strings.Split(itemsToScan, "\n")
+	prevName := ""
 	for _, line := range lines {
 		searched := strings.TrimSpace(line)
 		if searched == "" {
@@ -479,11 +476,12 @@ func startMarketScan() {
 
 		GlobalScanner.SearchItem(searched)
 		GlobalScanner.ClickFirstResult()
-		scanResult := captureResult(searched)
+		scanResult := captureResult(searched, prevName, GlobalScanner.ClickFirstResult)
 		if scanResult == nil {
 			continue
 		}
 		scanResults = append(scanResults, *scanResult)
+		prevName = scanResult.Name
 		g.Update()
 
 		// Se o nome encontrado não bate com o buscado e há segundo resultado calibrado,
@@ -491,9 +489,10 @@ func startMarketScan() {
 		if GlobalScanner.HasSecondResult && GlobalScanner.HasNameCalib &&
 			len(scanResult.Prices) > 0 && !namesMatch(searched, scanResult.Name) {
 			GlobalScanner.ClickSecondResult()
-			scanResult2 := captureResult(searched)
+			scanResult2 := captureResult(searched, prevName, GlobalScanner.ClickSecondResult)
 			if scanResult2 != nil {
 				scanResults = append(scanResults, *scanResult2)
+				prevName = scanResult2.Name
 				g.Update()
 			}
 		}
@@ -501,27 +500,30 @@ func startMarketScan() {
 }
 
 // captureResult lê nome e todos os tiers de preço do item atualmente selecionado.
-// O parâmetro searched é usado como fallback de nome quando o OCR de nome não está calibrado.
-// Tenta até 2 vezes clicar no item caso o nome não apareça.
-func captureResult(searched string) *ScanResult {
+// prevName: nome do item anterior — se o nome capturado for igual, considera inválido e retenta.
+// retryClick: função a chamar para reabrir o item no retry (ClickFirstResult ou ClickSecondResult).
+func captureResult(searched, prevName string, retryClick func()) *ScanResult {
 	capturedName := searched
 	if GlobalScanner.HasNameCalib {
 		const maxAttempts = 2
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			n, err := GlobalScanner.CaptureItemName()
-			if err != nil {
-				log.Printf("Attempt %d: error capturing name for %s: %v", attempt, searched, err)
-			} else if n != "" {
+			nameOk := err == nil && n != "" && !namesMatch(n, prevName)
+			if nameOk {
 				capturedName = n
 				break
 			}
 			if attempt < maxAttempts {
-				log.Printf("Attempt %d: name empty, tentando segundo resultado...", attempt)
-				if GlobalScanner.HasSecondResult {
-					GlobalScanner.ClickSecondResult()
+				if err != nil {
+					log.Printf("Attempt %d: error capturing name for %s: %v", attempt, searched, err)
 				} else {
-					GlobalScanner.ClickFirstResult()
+					log.Printf("Attempt %d: name '%s' inválido (vazio ou igual ao anterior '%s'), fechando e reabrindo", attempt, n, prevName)
 				}
+				if GlobalScanner.HasCloseItem {
+					GlobalScanner.ClickCloseItem()
+				}
+				// Move levemente em direção aleatória antes de tentar novamente
+				nudgeAndRetry(retryClick)
 			}
 		}
 	}
@@ -538,6 +540,18 @@ func captureResult(searched string) *ScanResult {
 // namesMatch compara dois nomes ignorando maiúsculas/minúsculas e espaços extras.
 func namesMatch(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+// nudgeAndRetry move o mouse alguns pixels em direção aleatória (cima/baixo/esquerda/direita)
+// antes de executar o clique de retry, simulando uma tentativa humana de reposicionar.
+func nudgeAndRetry(retryClick func()) {
+	cx, cy := robotgo.GetMousePos()
+	drift := 4 + rand.Intn(8) // 4–11 pixels
+	dirs := [][2]int{{drift, 0}, {-drift, 0}, {0, drift}, {0, -drift}}
+	d := dirs[rand.Intn(4)]
+	MoveHumanLike(cx+d[0], cy+d[1])
+	time.Sleep(time.Duration(randRange(80, 200)) * time.Millisecond)
+	retryClick()
 }
 
 func main() {

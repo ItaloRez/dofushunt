@@ -10,9 +10,10 @@ import (
 )
 
 type ScannerConfig struct {
-	SearchBar       *PointJSON `json:"search_bar,omitempty"`
+	SearchBarRect   *RectJSON  `json:"search_bar_rect,omitempty"`
 	FirstResult     *PointJSON `json:"first_result,omitempty"`
 	SecondResult    *PointJSON `json:"second_result,omitempty"`
+	CloseItem       *PointJSON `json:"close_item,omitempty"`
 	PriceArea       *RectJSON  `json:"price_area,omitempty"`
 	QtyColRect      *RectJSON  `json:"qty_col_rect,omitempty"`
 	PriceColRect    *RectJSON  `json:"price_col_rect,omitempty"`
@@ -21,6 +22,8 @@ type ScannerConfig struct {
 	HasNameCalib    bool       `json:"has_name_calib"`
 	HasSecondResult bool       `json:"has_second_result"`
 	HasSplitCalib   bool       `json:"has_split_calib"`
+	HasCloseItem    bool       `json:"has_close_item"`
+	HasSearchBar    bool       `json:"has_search_bar"`
 }
 
 type PointJSON struct {
@@ -69,8 +72,10 @@ func SaveConfig() {
 		HasNameCalib: GlobalScanner.HasNameCalib,
 	}
 
-	if GlobalScanner.SearchBar != (image.Point{}) {
-		cfg.SearchBar = &PointJSON{X: GlobalScanner.SearchBar.X, Y: GlobalScanner.SearchBar.Y}
+	if GlobalScanner.HasSearchBar {
+		r := GlobalScanner.SearchBarRect
+		cfg.SearchBarRect = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
+		cfg.HasSearchBar = true
 	}
 	if GlobalScanner.FirstResult != (image.Point{}) {
 		cfg.FirstResult = &PointJSON{X: GlobalScanner.FirstResult.X, Y: GlobalScanner.FirstResult.Y}
@@ -78,6 +83,10 @@ func SaveConfig() {
 	if GlobalScanner.HasSecondResult {
 		cfg.SecondResult = &PointJSON{X: GlobalScanner.SecondResult.X, Y: GlobalScanner.SecondResult.Y}
 		cfg.HasSecondResult = true
+	}
+	if GlobalScanner.HasCloseItem {
+		cfg.CloseItem = &PointJSON{X: GlobalScanner.CloseItem.X, Y: GlobalScanner.CloseItem.Y}
+		cfg.HasCloseItem = true
 	}
 	if GlobalScanner.IsCalibrated {
 		r := GlobalScanner.PriceAreaRect
@@ -125,14 +134,17 @@ func LoadConfig() {
 		return
 	}
 
-	if cfg.SearchBar != nil {
-		GlobalScanner.SearchBar = image.Point{X: cfg.SearchBar.X, Y: cfg.SearchBar.Y}
+	if cfg.SearchBarRect != nil {
+		GlobalScanner.SearchBarRect = image.Rect(cfg.SearchBarRect.X1, cfg.SearchBarRect.Y1, cfg.SearchBarRect.X2, cfg.SearchBarRect.Y2)
 	}
 	if cfg.FirstResult != nil {
 		GlobalScanner.FirstResult = image.Point{X: cfg.FirstResult.X, Y: cfg.FirstResult.Y}
 	}
 	if cfg.SecondResult != nil {
 		GlobalScanner.SecondResult = image.Point{X: cfg.SecondResult.X, Y: cfg.SecondResult.Y}
+	}
+	if cfg.CloseItem != nil {
+		GlobalScanner.CloseItem = image.Point{X: cfg.CloseItem.X, Y: cfg.CloseItem.Y}
 	}
 	if cfg.PriceArea != nil {
 		GlobalScanner.PriceAreaRect = image.Rect(cfg.PriceArea.X1, cfg.PriceArea.Y1, cfg.PriceArea.X2, cfg.PriceArea.Y2)
@@ -150,6 +162,8 @@ func LoadConfig() {
 	GlobalScanner.HasNameCalib = cfg.HasNameCalib
 	GlobalScanner.HasSecondResult = cfg.HasSecondResult
 	GlobalScanner.HasSplitCalib = cfg.HasSplitCalib
+	GlobalScanner.HasCloseItem = cfg.HasCloseItem
+	GlobalScanner.HasSearchBar = cfg.HasSearchBar
 
 	log.Printf("Config carregado: %s (price=%v name=%v)", path, cfg.IsCalibrated, cfg.HasNameCalib)
 }

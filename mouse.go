@@ -111,7 +111,7 @@ func MoveHumanLike(targetX, targetY int) {
 
 		// Velocidade variável: mais lento no início e fim, mais rápido no meio
 		speedFactor := 0.5 + math.Sin(t*math.Pi)*0.5 // 0→1→0
-		delay := randRange(1, 4) * (1.5 - speedFactor)
+		delay := randRange(5, 14) * (1.5 - speedFactor)
 		time.Sleep(time.Duration(delay) * time.Millisecond)
 	}
 

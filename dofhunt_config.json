@@ -1,15 +1,21 @@
 {
-  "search_bar": {
-    "x": 542,
-    "y": 283
+  "search_bar_rect": {
+    "x1": 470,
+    "y1": 266,
+    "x2": 640,
+    "y2": 288
   },
   "first_result": {
-    "x": 744,
-    "y": 322
+    "x": 761,
+    "y": 319
   },
   "second_result": {
-    "x": 734,
-    "y": 380
+    "x": 773,
+    "y": 384
+  },
+  "close_item": {
+    "x": 404,
+    "y": 256
   },
   "price_area": {
     "x1": 119,
@@ -18,25 +24,27 @@
     "y2": 459
   },
   "qty_col_rect": {
-    "x1": 120,
+    "x1": 121,
     "y1": 426,
-    "x2": 180,
-    "y2": 460
+    "x2": 191,
+    "y2": 459
   },
   "price_col_rect": {
-    "x1": 216,
+    "x1": 186,
     "y1": 427,
     "x2": 303,
-    "y2": 460
+    "y2": 459
   },
   "item_name_rect": {
-    "x1": 142,
-    "y1": 275,
-    "x2": 416,
-    "y2": 303
+    "x1": 144,
+    "y1": 274,
+    "x2": 415,
+    "y2": 302
   },
   "is_calibrated": true,
   "has_name_calib": true,
   "has_second_result": true,
-  "has_split_calib": true
+  "has_split_calib": true,
+  "has_close_item": true,
+  "has_search_bar": true
 }

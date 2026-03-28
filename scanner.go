@@ -21,9 +21,10 @@ import (
 )
 
 type MarketScanner struct {
-	SearchBar       image.Point
+	SearchBarRect   image.Rectangle // área do campo de busca (para OCR + clique)
 	FirstResult     image.Point
 	SecondResult    image.Point
+	CloseItem       image.Point
 	PriceAreaRect   image.Rectangle // fallback (sem split)
 	QtyColRect      image.Rectangle // coluna de quantidade (split)
 	PriceColRect    image.Rectangle // coluna de preço (split)
@@ -31,7 +32,9 @@ type MarketScanner struct {
 	IsCalibrated    bool
 	HasNameCalib    bool
 	HasSecondResult bool
-	HasSplitCalib   bool // true quando qty+price foram calibrados separadamente
+	HasSplitCalib   bool
+	HasCloseItem    bool
+	HasSearchBar    bool
 }
 
 type PriceTier struct {
@@ -41,14 +44,80 @@ type PriceTier struct {
 
 var GlobalScanner = &MarketScanner{}
 
+// focusDofus traz a janela do Dofus para frente antes de interagir.
+func focusDofus() {
+	fpid, err := robotgo.FindIds("Dofus")
+	if err != nil || len(fpid) == 0 {
+		log.Printf("focusDofus: Dofus não encontrado: %v", err)
+		return
+	}
+	robotgo.ActivePid(fpid[0])
+	time.Sleep(300 * time.Millisecond)
+}
+
+// searchBarHasText captura a área do campo de busca e verifica via OCR se há texto digitado.
+func (s *MarketScanner) searchBarHasText() bool {
+	img, err := screenshot.CaptureRect(s.SearchBarRect)
+	if err != nil || img == nil {
+		return false
+	}
+	bounds := img.Bounds()
+	inverted := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, gv, b, a := img.At(x, y).RGBA()
+			inverted.SetRGBA(x, y, struct{ R, G, B, A uint8 }{
+				R: uint8(255 - r>>8),
+				G: uint8(255 - gv>>8),
+				B: uint8(255 - b>>8),
+				A: uint8(a >> 8),
+			})
+		}
+	}
+	scaled := scaleImage(inverted, 3)
+	tmpPath := "/Volumes/ssd/www/Pessoal/dofus/dofushunt/debug_search.png"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return false
+	}
+	png.Encode(f, scaled)
+	f.Close()
+
+	client := gosseract.NewClient()
+	defer client.Close()
+	client.SetImage(tmpPath)
+	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+	text, err := client.Text()
+	if err != nil {
+		return false
+	}
+	result := strings.TrimSpace(text) != ""
+	log.Printf("searchBarHasText: '%s' -> %v", strings.TrimSpace(text), result)
+	return result
+}
+
 func (s *MarketScanner) SearchItem(name string) {
 	log.Printf("Searching for item: %s", name)
-	MoveHumanLike(s.SearchBar.X, s.SearchBar.Y)
-	// Double click para abrir o campo
-	ClickHumanLike()
-	time.Sleep(time.Duration(randRange(60, 120)) * time.Millisecond)
-	ClickHumanLike()
-	time.Sleep(400 * time.Millisecond)
+
+	// Garante foco no Dofus antes de qualquer interação
+	mainthread.Call(focusDofus)
+
+	cx := (s.SearchBarRect.Min.X + s.SearchBarRect.Max.X) / 2
+	cy := (s.SearchBarRect.Min.Y + s.SearchBarRect.Max.Y) / 2
+
+	if s.searchBarHasText() {
+		// Tem texto: mover para a direita do input (onde fica o X), pausar e clicar
+		rightX := s.SearchBarRect.Max.X - 12
+		MoveHumanLike(rightX, cy)
+		time.Sleep(time.Duration(randRange(200, 450)) * time.Millisecond)
+		ClickHumanLike()
+		time.Sleep(time.Duration(randRange(250, 450)) * time.Millisecond)
+	} else {
+		// Campo vazio: um clique simples para focar
+		MoveHumanLike(cx, cy)
+		ClickHumanLike()
+		time.Sleep(time.Duration(randRange(200, 350)) * time.Millisecond)
+	}
 
 	// 15% de chance de um clique extra (simulando erro humano)
 	if rand.Float64() < 0.15 {
@@ -57,25 +126,12 @@ func (s *MarketScanner) SearchItem(name string) {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	// Triple click para selecionar todo o texto existente no campo
-	ClickHumanLike()
-	time.Sleep(50 * time.Millisecond)
-	ClickHumanLike()
-	time.Sleep(50 * time.Millisecond)
-	ClickHumanLike()
-	time.Sleep(200 * time.Millisecond)
-
-	// Apaga o texto selecionado
-	mainthread.Call(func() {
-		robotgo.KeyTap("backspace")
-	})
-	time.Sleep(200 * time.Millisecond)
-
 	TypeHumanLike(name)
 	mainthread.Call(func() {
 		robotgo.KeyTap("enter")
 	})
-	time.Sleep(800 * time.Millisecond) // Aguarda os resultados filtrarem
+	// Aguarda os resultados carregarem antes de clicar (tempo variável)
+	time.Sleep(time.Duration(randRange(1200, 2200)) * time.Millisecond)
 }
 
 func (s *MarketScanner) ClickFirstResult() {
@@ -90,6 +146,13 @@ func (s *MarketScanner) ClickSecondResult() {
 	MoveHumanLike(s.SecondResult.X, s.SecondResult.Y)
 	ClickHumanLike()
 	time.Sleep(500 * time.Millisecond)
+}
+
+func (s *MarketScanner) ClickCloseItem() {
+	log.Println("Closing item")
+	MoveHumanLike(s.CloseItem.X, s.CloseItem.Y)
+	ClickHumanLike()
+	time.Sleep(time.Duration(randRange(300, 600)) * time.Millisecond)
 }
 
 func (s *MarketScanner) CapturePrice() (int64, error) {
@@ -467,15 +530,6 @@ func parsePriceOnly(text string) int64 {
 	return price
 }
 
-func (s *MarketScanner) CalibrateSearchBar() {
-	log.Println(">>> CALIBRANDO BARRA DE BUSCA EM 3 SEGUNDOS... Posicione o mouse!")
-	time.Sleep(3 * time.Second)
-	x, y := robotgo.GetMousePos()
-	fmt.Print("\a") // Bell sound
-	s.SearchBar = image.Point{x, y}
-	log.Printf("!!! BARRA DE BUSCA CALIBRADA: %v", s.SearchBar)
-	SaveConfig()
-}
 
 func (s *MarketScanner) CalibrateFirstResult() {
 	log.Println(">>> CALIBRANDO PRIMEIRO RESULTADO EM 3 SEGUNDOS... Posicione o mouse!")
