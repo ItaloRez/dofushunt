@@ -3,3 +3,4 @@
 *.syso
 
 .env
+dist

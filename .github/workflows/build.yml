@@ -1,0 +1,116 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build macOS (ARM64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          brew install tesseract pkg-config
+
+      - name: Create .env from Secrets
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
+          echo "BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}" >> .env
+          echo "BETTER_AUTH_URL=${{ secrets.BETTER_AUTH_URL }}" >> .env
+          echo "NEXT_PUBLIC_BETTER_AUTH_URL=${{ secrets.NEXT_PUBLIC_BETTER_AUTH_URL }}" >> .env
+          echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/dofhunt .
+
+      - name: Package
+        run: |
+          cp clues.json dist/
+          cp .env dist/
+          cp -r install dist/
+          cd dist
+          zip -r ../dofushunt-macos-arm64.zip .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dofushunt-macos-arm64
+          path: dofushunt-macos-arm64.zip
+
+  build-windows:
+    name: Build Windows (AMD64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install vcpkg Dependencies
+        uses: microsoft/vcpkg-action@v1
+        with:
+          pkgs: tesseract leptonica
+          triplet: x64-windows-static
+          cache: true
+
+      - name: Create .env from Secrets
+        shell: bash
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
+          echo "BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}" >> .env
+          echo "BETTER_AUTH_URL=${{ secrets.BETTER_AUTH_URL }}" >> .env
+          echo "NEXT_PUBLIC_BETTER_AUTH_URL=${{ secrets.NEXT_PUBLIC_BETTER_AUTH_URL }}" >> .env
+          echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
+
+      - name: Install go-winres
+        run: go install github.com/tc-hib/go-winres@latest
+
+      - name: Generate Windows Resources
+        run: |
+          $env:Path += ";$(go env GOPATH)\bin"
+          go-winres make
+
+      - name: Build
+        shell: bash
+        run: |
+          # Configure CGO for vcpkg
+          export VCPKG_INSTALLED_ROOT="${{ github.workspace }}/vcpkg_installed/x64-windows-static"
+          export CGO_CFLAGS="-I$VCPKG_INSTALLED_ROOT/include"
+          export CGO_LDFLAGS="-L$VCPKG_INSTALLED_ROOT/lib -ltesseract50 -lleptonica-1.82.0 -lws2_32" 
+          # Note: filenames might vary slightly depending on vcpkg version. 
+          # We'll use more generic flags if possible or try to find them.
+          
+          mkdir -p build-win
+          go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui -extldflags=-static" .
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item "clues.json" "build-win/"
+          Copy-Item ".env" "build-win/"
+          Copy-Item -Recurse "install" "build-win/"
+          Compress-Archive -Path "build-win/*" -DestinationPath "dofushunt-windows-amd64.zip"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dofushunt-windows-amd64
+          path: dofushunt-windows-amd64.zip
