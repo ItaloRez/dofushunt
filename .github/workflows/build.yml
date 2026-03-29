@@ -88,13 +88,8 @@ jobs:
           echo "NEXT_PUBLIC_BETTER_AUTH_URL=${{ secrets.NEXT_PUBLIC_BETTER_AUTH_URL }}" >> .env
           echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
 
-      - name: Install go-winres
-        run: go install github.com/tc-hib/go-winres@latest
-
       - name: Generate Windows Resources
-        run: |
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          go-winres make
+        run: go run github.com/tc-hib/go-winres@latest make
 
       - name: Build
         run: |
