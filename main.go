@@ -15,6 +15,7 @@ import (
 	"github.com/AllenDang/cimgui-go/imgui"
 	g "github.com/AllenDang/giu"
 	"github.com/go-vgo/robotgo"
+	"golang.design/x/hotkey/mainthread"
 )
 
 func DecodeEmbedded(data []byte) (*image.RGBA, error) {
@@ -347,6 +348,15 @@ func loop() {
 						g.Button("Limpar").OnClick(func() {
 							scanResults = []ScanResult{}
 						}),
+						g.Button("Testar OCR").Disabled(!GlobalScanner.IsCalibrated).OnClick(func() {
+							go func() {
+								res := captureResult("TESTE_OCR", "", func() {})
+								if res != nil {
+									scanResults = append(scanResults, *res)
+									g.Update()
+								}
+							}()
+						}),
 					),
 					g.Custom(func() {
 						if GlobalScanner.IsCalibrated {
@@ -670,6 +680,10 @@ func nudgeAndRetry(retryClick func()) {
 }
 
 func main() {
+	mainthread.Init(realMain)
+}
+
+func realMain() {
 	rand.Seed(time.Now().UnixNano())
 	LoadConfig() // Carrega calibrações salvas
 	wnd = g.NewMasterWindow("DofHunt", 380, 263, g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFrameless|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent)

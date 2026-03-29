@@ -15,7 +15,7 @@ import (
 	g "github.com/AllenDang/giu"
 	"github.com/go-vgo/robotgo"
 	"github.com/kbinani/screenshot"
-	"github.com/otiai10/gosseract/v2"
+	"os/exec"
 	"golang.design/x/hotkey/mainthread"
 	"golang.org/x/image/draw"
 )
@@ -45,6 +45,16 @@ type PriceTier struct {
 }
 
 var GlobalScanner = &MarketScanner{}
+
+var tesseractCmd = "tesseract"
+
+func init() {
+	if _, err := os.Stat("C:\\Program Files\\Tesseract-OCR\\tesseract.exe"); err == nil {
+		tesseractCmd = "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+	} else if _, err := os.Stat("C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe"); err == nil {
+		tesseractCmd = "C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe"
+	}
+}
 
 // focusDofus traz a janela do Dofus para frente antes de interagir.
 func focusDofus() {
@@ -77,7 +87,7 @@ func (s *MarketScanner) searchBarHasText() bool {
 		}
 	}
 	scaled := scaleImage(inverted, 3)
-	tmpPath := "/Volumes/ssd/www/Pessoal/dofus/dofushunt/debug_search.png"
+	tmpPath := "debug_search.png"
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return false
@@ -85,14 +95,13 @@ func (s *MarketScanner) searchBarHasText() bool {
 	png.Encode(f, scaled)
 	f.Close()
 
-	client := gosseract.NewClient()
-	defer client.Close()
-	client.SetImage(tmpPath)
-	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
-	text, err := client.Text()
+	cmd := exec.Command(tesseractCmd, tmpPath, "stdout", "--psm", "7")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("OCR searchBar falhou: %v, output: %s", err, string(out))
 		return false
 	}
+	text := string(out)
 	result := strings.TrimSpace(text) != ""
 	log.Printf("searchBarHasText: '%s' -> %v", strings.TrimSpace(text), result)
 	return result
@@ -259,7 +268,7 @@ func ocrNumber(rect image.Rectangle, updatePreview bool) (int64, error) {
 
 	scaled := scaleImage(inverted, 3)
 
-	tmpPath := "/Volumes/ssd/www/Pessoal/dofus/dofushunt/debug_price.png"
+	tmpPath := "debug_price.png"
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create debug file: %w", err)
@@ -270,16 +279,12 @@ func ocrNumber(rect image.Rectangle, updatePreview bool) (int64, error) {
 		return 0, fmt.Errorf("failed to encode image: %w", err)
 	}
 
-	client := gosseract.NewClient()
-	defer client.Close()
-	client.SetImage(tmpPath)
-	client.SetWhitelist("0123456789. ,kK")
-	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
-
-	text, err := client.Text()
+	cmd := exec.Command(tesseractCmd, tmpPath, "stdout", "--psm", "7", "-c", "tessedit_char_whitelist=0123456789. ,kK")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("OCR failed: %w", err)
+		return 0, fmt.Errorf("OCR failed: %w, output: %s", err, string(out))
 	}
+	text := string(out)
 
 	n := parsePriceOnly(text)
 	log.Printf("ocrNumber rect=%v text='%s' -> %d", rect, strings.TrimSpace(text), n)
@@ -321,7 +326,7 @@ func capturePriceRect(rect image.Rectangle, updatePreview bool) (int64, error) {
 
 	scaled := scaleImage(inverted, 3)
 
-	tmpPath := "/Volumes/ssd/www/Pessoal/dofus/dofushunt/debug_price.png"
+	tmpPath := "debug_price.png"
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create debug file: %w", err)
@@ -332,16 +337,12 @@ func capturePriceRect(rect image.Rectangle, updatePreview bool) (int64, error) {
 		return 0, fmt.Errorf("failed to encode image: %w", err)
 	}
 
-	client := gosseract.NewClient()
-	defer client.Close()
-	client.SetImage(tmpPath)
-	client.SetWhitelist("0123456789. ,kK")
-	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
-
-	text, err := client.Text()
+	cmd := exec.Command(tesseractCmd, tmpPath, "stdout", "--psm", "7", "-c", "tessedit_char_whitelist=0123456789. ,kK")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("OCR failed: %w", err)
+		return 0, fmt.Errorf("OCR failed: %w, output: %s", err, string(out))
 	}
+	text := string(out)
 
 	price := parsePriceOnly(text)
 	log.Printf("Captured price text: '%s' -> price=%d", strings.TrimSpace(text), price)
@@ -386,7 +387,7 @@ func (s *MarketScanner) CaptureItemName() (string, error) {
 	g.Update()
 
 	// Salva versão invertida para OCR e debug
-	debugPath := "/Volumes/ssd/www/Pessoal/dofus/dofushunt/debug_name.png"
+	debugPath := "debug_name.png"
 	f, _ := os.Create(debugPath)
 	if f != nil {
 		png.Encode(f, inverted)
@@ -394,16 +395,12 @@ func (s *MarketScanner) CaptureItemName() (string, error) {
 	}
 
 	// OCR configurado para linha única e texto livre
-	client := gosseract.NewClient()
-	defer client.Close()
-	client.SetImage(debugPath)
-	// PSM 7 = linha única de texto; OEM 1 = LSTM neural net
-	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
-
-	text, err := client.Text()
+	cmd := exec.Command(tesseractCmd, debugPath, "stdout", "--psm", "7")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("OCR nome falhou: %w", err)
+		return "", fmt.Errorf("OCR nome falhou: %w, output: %s", err, string(out))
 	}
+	text := string(out)
 
 	name := cleanItemName(strings.TrimSpace(text))
 	log.Printf("Captured item name: '%s'", name)
