@@ -91,6 +91,9 @@ jobs:
       - name: Generate Windows Resources
         run: go run github.com/tc-hib/go-winres@latest make
 
+      - name: Force Install Dependencies via Pacman
+        run: pacman -Sy --noconfirm mingw-w64-x86_64-leptonica mingw-w64-x86_64-tesseract-ocr
+
       - name: Build
         run: |
           mkdir -p build-win
