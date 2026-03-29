@@ -81,7 +81,6 @@ jobs:
             zip
 
       - name: Create .env from Secrets
-        shell: bash
         run: |
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
           echo "BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}" >> .env
@@ -90,23 +89,19 @@ jobs:
           echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
 
       - name: Install go-winres
-        shell: bash
         run: go install github.com/tc-hib/go-winres@latest
 
       - name: Generate Windows Resources
-        shell: bash
         run: |
-          export PATH="$PATH:$(go env GOPATH)/bin"
+          export PATH="$(go env GOPATH)/bin:$PATH"
           go-winres make
 
       - name: Build
-        shell: bash
         run: |
           mkdir -p build-win
           go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui -extldflags=-static" .
 
       - name: Package
-        shell: bash
         run: |
           cp clues.json build-win/
           cp .env build-win/
@@ -119,3 +114,27 @@ jobs:
         with:
           name: dofushunt-windows-amd64
           path: dofushunt-windows-amd64.zip
+
+  release:
+    name: Publish Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Update Nightly Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: nightly
+          name: "Nightly Build (main)"
+          body: "Compilação automática mais recente da branch main.\n\nBaixe o arquivo `.zip` correspondente ao seu sistema operacional abaixo."
+          allowUpdates: true
+          replacesArtifacts: true
+          prerelease: true
+          artifacts: "artifacts/*/*.zip"
+
