@@ -98,6 +98,14 @@ jobs:
         run: |
           mkdir -p build-win
           export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
+          
+          # CRAZY LINKER TRICK:
+          # cimgui-go injects `-static` globally which prevents MSYS2 gcc from finding our
+          # dynamic Tesseract libraries (it refuses .dll.a files). We literally copy the 
+          # dynamic import libs to .a extensions so the linker is tricked into using them.
+          cp /mingw64/lib/libtesseract.dll.a /mingw64/lib/libtesseract.a
+          cp /mingw64/lib/libleptonica.dll.a /mingw64/lib/libleptonica.a
+          
           go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui" .
 
       - name: Bundle Runtime Dependencies
