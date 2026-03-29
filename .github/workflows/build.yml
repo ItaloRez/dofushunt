@@ -1,0 +1,152 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build macOS (ARM64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          brew install tesseract leptonica pkg-config
+
+      - name: Create .env from Secrets
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
+          echo "BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}" >> .env
+          echo "BETTER_AUTH_URL=${{ secrets.BETTER_AUTH_URL }}" >> .env
+          echo "NEXT_PUBLIC_BETTER_AUTH_URL=${{ secrets.NEXT_PUBLIC_BETTER_AUTH_URL }}" >> .env
+          echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
+
+      - name: Build
+        run: |
+          mkdir -p dist
+          export CGO_CFLAGS="-I$(brew --prefix)/include"
+          export CGO_CXXFLAGS="-I$(brew --prefix)/include"
+          export CGO_LDFLAGS="-L$(brew --prefix)/lib"
+          export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/dofhunt .
+
+      - name: Package
+        run: |
+          cp clues.json dist/
+          cp .env dist/
+          cp -r install dist/
+          cd dist
+          zip -r ../dofushunt-macos-arm64.zip .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dofushunt-macos-arm64
+          path: dofushunt-macos-arm64.zip
+
+  build-windows:
+    name: Build Windows (AMD64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-tesseract-ocr
+            mingw-w64-x86_64-leptonica
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-go
+            zip
+
+      - name: Create .env from Secrets
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
+          echo "BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}" >> .env
+          echo "BETTER_AUTH_URL=${{ secrets.BETTER_AUTH_URL }}" >> .env
+          echo "NEXT_PUBLIC_BETTER_AUTH_URL=${{ secrets.NEXT_PUBLIC_BETTER_AUTH_URL }}" >> .env
+          echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
+
+      - name: Generate Windows Resources
+        run: go run github.com/tc-hib/go-winres@latest make
+
+      - name: Force Install Dependencies via Pacman
+        run: pacman -Sy --noconfirm mingw-w64-x86_64-leptonica mingw-w64-x86_64-tesseract-ocr
+
+      - name: Build
+        run: |
+          mkdir -p build-win
+          export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
+          
+          # CRAZY LINKER TRICK:
+          # cimgui-go injects `-static` globally which prevents MSYS2 gcc from finding our
+          # dynamic Tesseract libraries (it refuses .dll.a files). We literally copy the 
+          # dynamic import libs to .a extensions so the linker is tricked into using them.
+          cp /mingw64/lib/libtesseract.dll.a /mingw64/lib/libtesseract.a
+          cp /mingw64/lib/libleptonica.dll.a /mingw64/lib/libleptonica.a
+          
+          go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui" .
+
+      - name: Bundle Runtime Dependencies
+        run: |
+          # Copy all required dynamic libraries (Tesseract, Robotgo, libgcc) from MSYS2
+          ldd build-win/dofhunt.exe | grep /mingw64/bin/ | awk '{print $3}' | xargs -I '{}' cp '{}' build-win/
+
+      - name: Package
+        run: |
+          cp clues.json build-win/
+          cp .env build-win/
+          cp -r install build-win/
+          cd build-win
+          zip -r ../dofushunt-windows-amd64.zip .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dofushunt-windows-amd64
+          path: dofushunt-windows-amd64.zip
+
+  release:
+    name: Publish Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Update Nightly Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: nightly
+          name: "Nightly Build (main)"
+          body: "Compilação automática mais recente da branch main.\n\nBaixe o arquivo `.zip` correspondente ao seu sistema operacional abaixo."
+          allowUpdates: true
+          replacesArtifacts: true
+          prerelease: true
+          artifacts: "artifacts/*/*.zip"
+
