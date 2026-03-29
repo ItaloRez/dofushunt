@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"golang.design/x/hotkey/mainthread"
 	"golang.org/x/image/draw"
+	"github.com/otiai10/gosseract/v2"
 )
 
 type MarketScanner struct {
