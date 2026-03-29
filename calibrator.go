@@ -71,7 +71,20 @@ func StartCalibrationPoint(title string, onDone func(image.Point)) {
 
 func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 	go func() {
-		bounds := screenshot.GetDisplayBounds(0)
+		// Detecta o monitor onde o cursor está (provável monitor do Dofus)
+		displayIdx := 0
+		if n := screenshot.NumActiveDisplays(); n > 1 {
+			mx, my := robotgo.GetMousePos()
+			for i := 0; i < n; i++ {
+				b := screenshot.GetDisplayBounds(i)
+				if mx >= b.Min.X && mx < b.Max.X && my >= b.Min.Y && my < b.Max.Y {
+					displayIdx = i
+					break
+				}
+			}
+		}
+
+		bounds := screenshot.GetDisplayBounds(displayIdx)
 		img, err := screenshot.CaptureRect(bounds)
 		if err != nil {
 			log.Printf("Falha ao capturar tela: %v", err)
@@ -79,7 +92,7 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 		}
 
 		screenW, screenH := robotgo.GetScreenSize()
-		log.Printf("Tela lógica: %dx%d | Screenshot físico: %dx%d", screenW, screenH, bounds.Dx(), bounds.Dy())
+		log.Printf("Display %d | Tela lógica: %dx%d | Screenshot físico: %dx%d", displayIdx, screenW, screenH, bounds.Dx(), bounds.Dy())
 
 		mainthread.Call(func() {
 			// Salva posição/tamanho apenas no primeiro passo da sequência
@@ -96,8 +109,8 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 			calibIsPoint = isPoint
 			calibOnDone = onDone
 			calibActive = true
-			wnd.SetPos(0, 0)
-			wnd.SetSize(screenW, screenH)
+			wnd.SetPos(bounds.Min.X, bounds.Min.Y)
+			wnd.SetSize(bounds.Dx(), bounds.Dy())
 		})
 		g.Update()
 	}()
@@ -448,6 +461,18 @@ func finishCalibration() {
 	y1 := int((clamp32(calibDragStart.Y, calibImgMin.Y, calibImgMax.Y) - calibImgMin.Y) * scaleY)
 	x2 := int((clamp32(calibDragEnd.X, calibImgMin.X, calibImgMax.X) - calibImgMin.X) * scaleX)
 	y2 := int((clamp32(calibDragEnd.Y, calibImgMin.Y, calibImgMax.Y) - calibImgMin.Y) * scaleY)
+
+	// Corrige escala DPI: no Windows com HiDPI, GetDisplayBounds retorna pixels físicos
+	// enquanto robotgo.Move() espera pixels lógicos (SM_CXSCREEN). No macOS ambos usam
+	// CGDisplayBounds (lógico), então logW == calibPhysW e a correção é no-op.
+	logW, logH := robotgo.GetScreenSize()
+	if calibPhysW > 0 && logW > 0 && calibPhysW != logW {
+		x1 = x1 * logW / calibPhysW
+		y1 = y1 * logH / calibPhysH
+		x2 = x2 * logW / calibPhysW
+		y2 = y2 * logH / calibPhysH
+		log.Printf("Correção DPI aplicada (fator %.2fx): coords físicas→lógicas", float64(calibPhysW)/float64(logW))
+	}
 
 	if x1 > x2 {
 		x1, x2 = x2, x1
