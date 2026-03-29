@@ -94,7 +94,8 @@ jobs:
       - name: Build
         run: |
           mkdir -p build-win
-          go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui -extldflags=-static" .
+          export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
+          go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui -extldflags '-static -L/mingw64/lib'" .
 
       - name: Package
         run: |
