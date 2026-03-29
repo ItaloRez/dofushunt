@@ -22,9 +22,9 @@ import (
 
 type MarketScanner struct {
 	SearchBarRect   image.Rectangle // área do campo de busca (para OCR + clique)
-	FirstResult     image.Point
-	SecondResult    image.Point
-	ThirdResult     image.Point
+	FirstResult     image.Rectangle // rect do 1º resultado na lista (OCR + clique no centro)
+	SecondResult    image.Rectangle // rect do 2º resultado na lista (OCR + clique no centro)
+	ThirdResult     image.Rectangle // rect do 3º resultado na lista (OCR + clique no centro)
 	CloseItem       image.Point
 	PriceAreaRect   image.Rectangle // fallback (sem split)
 	QtyColRect      image.Rectangle // coluna de quantidade (split)
@@ -109,35 +109,62 @@ func (s *MarketScanner) searchBarHasText() bool {
 
 func (s *MarketScanner) SearchItem(name string) {
 	log.Printf("Searching for item: %s", name)
+	if shouldStopMarketScan() {
+		return
+	}
 
 	// Garante foco no Dofus antes de qualquer interação
 	mainthread.Call(focusDofus)
+	if shouldStopMarketScan() {
+		return
+	}
 
 	cx := (s.SearchBarRect.Min.X + s.SearchBarRect.Max.X) / 2
 	cy := (s.SearchBarRect.Min.Y + s.SearchBarRect.Max.Y) / 2
 
 	if s.searchBarHasText() {
+		if shouldStopMarketScan() {
+			return
+		}
 		// Tem texto: mover para a direita do input (onde fica o X), pausar e clicar
 		rightX := s.SearchBarRect.Max.X - 12
 		MoveHumanLike(rightX, cy)
 		time.Sleep(time.Duration(randRange(200, 450)) * time.Millisecond)
+		if shouldStopMarketScan() {
+			return
+		}
 		ClickHumanLike()
 		time.Sleep(time.Duration(randRange(250, 450)) * time.Millisecond)
 	} else {
+		if shouldStopMarketScan() {
+			return
+		}
 		// Campo vazio: um clique simples para focar
 		MoveHumanLike(cx, cy)
+		if shouldStopMarketScan() {
+			return
+		}
 		ClickHumanLike()
 		time.Sleep(time.Duration(randRange(200, 350)) * time.Millisecond)
 	}
 
 	// 15% de chance de um clique extra (simulando erro humano)
-	if rand.Float64() < 0.15 {
+	if !shouldStopMarketScan() && rand.Float64() < 0.15 {
 		time.Sleep(time.Duration(randRange(100, 300)) * time.Millisecond)
+		if shouldStopMarketScan() {
+			return
+		}
 		ClickHumanLike()
 		time.Sleep(200 * time.Millisecond)
 	}
 
+	if shouldStopMarketScan() {
+		return
+	}
 	TypeHumanLike(name)
+	if shouldStopMarketScan() {
+		return
+	}
 	mainthread.Call(func() {
 		robotgo.KeyTap("enter")
 	})
@@ -145,30 +172,98 @@ func (s *MarketScanner) SearchItem(name string) {
 	time.Sleep(time.Duration(randRange(1200, 2200)) * time.Millisecond)
 }
 
-func (s *MarketScanner) ClickFirstResult() {
-	log.Println("Clicking first result")
-	MoveHumanLike(s.FirstResult.X, s.FirstResult.Y)
+func clickResultRect(r image.Rectangle) {
+	cx := (r.Min.X + r.Max.X) / 2
+	cy := (r.Min.Y + r.Max.Y) / 2
+	MoveHumanLike(cx, cy)
+	if shouldStopMarketScan() {
+		return
+	}
 	ClickHumanLike()
 	time.Sleep(500 * time.Millisecond)
+}
+
+func (s *MarketScanner) ClickFirstResult() {
+	if shouldStopMarketScan() {
+		return
+	}
+	log.Println("Clicking first result")
+	clickResultRect(s.FirstResult)
 }
 
 func (s *MarketScanner) ClickSecondResult() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Clicking second result")
-	MoveHumanLike(s.SecondResult.X, s.SecondResult.Y)
-	ClickHumanLike()
-	time.Sleep(500 * time.Millisecond)
+	clickResultRect(s.SecondResult)
 }
 
 func (s *MarketScanner) ClickThirdResult() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Clicking third result")
-	MoveHumanLike(s.ThirdResult.X, s.ThirdResult.Y)
-	ClickHumanLike()
-	time.Sleep(500 * time.Millisecond)
+	clickResultRect(s.ThirdResult)
+}
+
+// ReadResultName lê via OCR o nome exibido em uma linha da lista de resultados
+// sem clicar no item. Usa a mesma pipeline de inversão + escala 3x.
+func (s *MarketScanner) ReadResultName(rect image.Rectangle) (string, error) {
+	if rect.Dx() < 5 || rect.Dy() < 5 {
+		return "", fmt.Errorf("rect inválido")
+	}
+	img, err := screenshot.CaptureRect(rect)
+	if err != nil || img == nil {
+		return "", fmt.Errorf("falha ao capturar rect: %w", err)
+	}
+
+	bounds := img.Bounds()
+	inverted := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := img.At(x, y).RGBA()
+			inverted.SetRGBA(x, y, struct{ R, G, B, A uint8 }{
+				R: uint8(255 - r>>8),
+				G: uint8(255 - g>>8),
+				B: uint8(255 - b>>8),
+				A: uint8(a >> 8),
+			})
+		}
+	}
+
+	scaled := scaleImage(inverted, 3)
+	tmpPath := "/Volumes/ssd/www/Pessoal/dofus/dofushunt/debug_name.png"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("falha ao criar debug: %w", err)
+	}
+	png.Encode(f, scaled)
+	f.Close()
+
+	client := gosseract.NewClient()
+	defer client.Close()
+	client.SetImage(tmpPath)
+	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
+	text, err := client.Text()
+	if err != nil {
+		return "", fmt.Errorf("OCR falhou: %w", err)
+	}
+
+	name := cleanItemName(strings.TrimSpace(text))
+	log.Printf("ReadResultName rect=%v -> '%s'", rect, name)
+	return name, nil
 }
 
 func (s *MarketScanner) ClickCloseItem() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Closing item")
 	MoveHumanLike(s.CloseItem.X, s.CloseItem.Y)
+	if shouldStopMarketScan() {
+		return
+	}
 	ClickHumanLike()
 	time.Sleep(time.Duration(randRange(300, 600)) * time.Millisecond)
 }
@@ -407,6 +502,7 @@ func (s *MarketScanner) CaptureItemName() (string, error) {
 	return name, nil
 }
 
+
 // cleanItemName remove ruído comum do OCR em nomes de itens do Dofus
 func cleanItemName(s string) string {
 	// Remove linhas vazias e pega primeira linha não-vazia
@@ -537,26 +633,6 @@ func parsePriceOnly(text string) int64 {
 }
 
 
-func (s *MarketScanner) CalibrateFirstResult() {
-	log.Println(">>> CALIBRANDO PRIMEIRO RESULTADO EM 3 SEGUNDOS... Posicione o mouse!")
-	time.Sleep(3 * time.Second)
-	x, y := robotgo.GetMousePos()
-	fmt.Print("\a") // Bell sound
-	s.FirstResult = image.Point{x, y}
-	log.Printf("!!! PRIMEIRO RESULTADO CALIBRADO: %v", s.FirstResult)
-	SaveConfig()
-}
-
-func (s *MarketScanner) CalibrateSecondResult() {
-	log.Println(">>> CALIBRANDO SEGUNDO RESULTADO EM 3 SEGUNDOS... Posicione o mouse!")
-	time.Sleep(3 * time.Second)
-	x, y := robotgo.GetMousePos()
-	fmt.Print("\a") // Bell sound
-	s.SecondResult = image.Point{x, y}
-	s.HasSecondResult = true
-	log.Printf("!!! SEGUNDO RESULTADO CALIBRADO: %v", s.SecondResult)
-	SaveConfig()
-}
 
 // scaleImage aumenta a imagem pelo fator dado usando interpolação bilinear.
 // Tesseract reconhece muito melhor fontes pequenas quando a imagem é ampliada.

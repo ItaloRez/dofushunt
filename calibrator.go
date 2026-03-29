@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
 
 	g "github.com/AllenDang/giu"
 	"github.com/AllenDang/cimgui-go/imgui"
@@ -14,6 +18,7 @@ import (
 
 var (
 	calibActive       bool
+	calibPending      bool // true enquanto screenshot está sendo capturado (UI principal oculta)
 	calibScreenTex    = &g.ReflectiveBoundTexture{}
 	calibPhysW        int
 	calibPhysH        int
@@ -32,7 +37,22 @@ var (
 	savedWndY         int
 	savedWndW         int
 	savedWndH         int
+	calibSessionPinned bool
+	calibSessionDisplay int
+	calibSessionRefocus bool
 )
+
+func beginCalibSession(pinned bool) {
+	calibSessionPinned = pinned
+	calibSessionDisplay = -1
+	calibSessionRefocus = true
+}
+
+func endCalibSession() {
+	calibSessionPinned = false
+	calibSessionDisplay = -1
+	calibSessionRefocus = false
+}
 
 func col32(r, gr, b, a uint8) uint32 {
 	return uint32(r) | uint32(gr)<<8 | uint32(b)<<16 | uint32(a)<<24
@@ -69,24 +89,99 @@ func StartCalibrationPoint(title string, onDone func(image.Point)) {
 	})
 }
 
+// getDofusWindowPos retorna a posição (x, y) do canto superior esquerdo da
+// janela do Dofus. No macOS usa osascript; no Windows/Linux usa robotgo.GetBounds.
+func getDofusWindowPos() (x, y int, ok bool) {
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("osascript", "-e",
+			`tell application "System Events" to tell process "Dofus" to get position of front window`).Output()
+		if err == nil {
+			parts := strings.Split(strings.TrimSpace(string(out)), ", ")
+			if len(parts) == 2 {
+				px, e1 := strconv.Atoi(parts[0])
+				py, e2 := strconv.Atoi(parts[1])
+				if e1 == nil && e2 == nil {
+					log.Printf("Dofus via osascript: pos=(%d,%d)", px, py)
+					return px, py, true
+				}
+			}
+			log.Printf("osascript parse falhou, saída: %q", strings.TrimSpace(string(out)))
+		} else {
+			log.Printf("osascript erro: %v", err)
+		}
+	}
+
+	// Fallback: robotgo.GetBounds (Windows / Linux)
+	pids, err := robotgo.FindIds("Dofus")
+	if err != nil || len(pids) == 0 {
+		log.Printf("Dofus não encontrado: %v", err)
+		return 0, 0, false
+	}
+	wx, wy, ww, wh := robotgo.GetBounds(pids[0])
+	log.Printf("Dofus GetBounds: x=%d y=%d w=%d h=%d", wx, wy, ww, wh)
+	if ww > 0 && wh > 0 {
+		return wx, wy, true
+	}
+	return 0, 0, false
+}
+
 func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 	go func() {
-		bounds := screenshot.GetDisplayBounds(0)
+		// Oculta a UI principal imediatamente, antes de tirar o screenshot.
+		mainthread.Call(func() {
+			// Salva posição/tamanho apenas no primeiro passo da sequência (antes de calibPending ser true).
+			if !calibActive && !calibPending {
+				savedWndX, savedWndY = wnd.GetPos()
+				savedWndW, savedWndH = wnd.GetSize()
+			}
+			calibPending = true
+		})
+		g.Update()
+
+		// Em sequência de calibração, evita alternar foco toda hora para reduzir flick.
+		if !calibSessionPinned || calibSessionDisplay < 0 {
+			mainthread.Call(focusDofus)
+		}
+
+		// Detecta o monitor onde a janela do Dofus está aberta
+		displayIdx := 0
+		if calibSessionPinned && calibSessionDisplay >= 0 {
+			displayIdx = calibSessionDisplay
+			log.Printf("Usando display fixo da sessão de calibração: %d", displayIdx)
+		} else {
+			if wx, wy, ok := getDofusWindowPos(); ok {
+				for i := 0; i < screenshot.NumActiveDisplays(); i++ {
+					b := screenshot.GetDisplayBounds(i)
+					if wx >= b.Min.X && wx < b.Max.X && wy >= b.Min.Y && wy < b.Max.Y {
+						displayIdx = i
+						break
+					}
+				}
+				log.Printf("Dofus detectado no display %d (pos: %d,%d)", displayIdx, wx, wy)
+			} else {
+				log.Printf("Posição do Dofus não disponível, usando display 0")
+			}
+			if calibSessionPinned {
+				calibSessionDisplay = displayIdx
+			}
+		}
+
+		bounds := screenshot.GetDisplayBounds(displayIdx)
 		img, err := screenshot.CaptureRect(bounds)
 		if err != nil {
 			log.Printf("Falha ao capturar tela: %v", err)
+			mainthread.Call(func() {
+				calibPending = false
+				restoreWindow()
+			})
+			g.Update()
 			return
 		}
 
 		screenW, screenH := robotgo.GetScreenSize()
-		log.Printf("Tela lógica: %dx%d | Screenshot físico: %dx%d", screenW, screenH, bounds.Dx(), bounds.Dy())
+		log.Printf("Display %d | Tela lógica: %dx%d | Screenshot físico: %dx%d", displayIdx, screenW, screenH, bounds.Dx(), bounds.Dy())
 
 		mainthread.Call(func() {
-			// Salva posição/tamanho apenas no primeiro passo da sequência
-			if !calibActive {
-				savedWndX, savedWndY = wnd.GetPos()
-				savedWndW, savedWndH = wnd.GetSize()
-			}
 			calibPhysW = bounds.Dx()
 			calibPhysH = bounds.Dy()
 			calibScreenTex.SetSurfaceFromRGBA(img, false)
@@ -95,9 +190,18 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 			calibTitle = title
 			calibIsPoint = isPoint
 			calibOnDone = onDone
+			calibPending = false
 			calibActive = true
-			wnd.SetPos(0, 0)
-			wnd.SetSize(screenW, screenH)
+			wnd.SetPos(bounds.Min.X, bounds.Min.Y)
+			wnd.SetSize(bounds.Dx(), bounds.Dy())
+
+			// Em sequência, faz refocus apenas uma vez para reduzir flick visual.
+			if !calibSessionPinned || calibSessionRefocus {
+				if err := robotgo.ActivePid(robotgo.GetPid()); err != nil {
+					log.Printf("Falha ao focar janela de calibração: %v", err)
+				}
+				calibSessionRefocus = false
+			}
 		})
 		g.Update()
 	}()
@@ -105,6 +209,7 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 
 // StartFullCalibration encadeia todos os passos de calibração em sequência.
 func StartFullCalibration() {
+	beginCalibSession(true)
 	calibStepNum = 0
 	calibTotalSteps = 8
 	runCalibStep1()
@@ -123,9 +228,9 @@ func runCalibStep1() {
 
 func runCalibStep2() {
 	calibStepNum = 2
-	StartCalibrationPoint("1º Resultado — clique sobre o primeiro item da lista", func(pt image.Point) {
-		GlobalScanner.FirstResult = pt
-		log.Printf("1º resultado calibrado: %v", pt)
+	StartCalibration("1º Resultado — arraste sobre o nome do primeiro item da lista", func(r image.Rectangle) {
+		GlobalScanner.FirstResult = r
+		log.Printf("1º resultado calibrado: %v", r)
 		SaveConfig()
 		runCalibStep3()
 	})
@@ -133,10 +238,10 @@ func runCalibStep2() {
 
 func runCalibStep3() {
 	calibStepNum = 3
-	StartCalibrationPoint("2º Resultado — clique sobre o segundo item da lista", func(pt image.Point) {
-		GlobalScanner.SecondResult = pt
+	StartCalibration("2º Resultado — arraste sobre o nome do segundo item da lista", func(r image.Rectangle) {
+		GlobalScanner.SecondResult = r
 		GlobalScanner.HasSecondResult = true
-		log.Printf("2º resultado calibrado: %v", pt)
+		log.Printf("2º resultado calibrado: %v", r)
 		SaveConfig()
 		runCalibStep4()
 	})
@@ -144,10 +249,10 @@ func runCalibStep3() {
 
 func runCalibStep4() {
 	calibStepNum = 4
-	StartCalibrationPoint("3º Resultado — clique sobre o terceiro item da lista", func(pt image.Point) {
-		GlobalScanner.ThirdResult = pt
+	StartCalibration("3º Resultado — arraste sobre o nome do terceiro item da lista", func(r image.Rectangle) {
+		GlobalScanner.ThirdResult = r
 		GlobalScanner.HasThirdResult = true
-		log.Printf("3º resultado calibrado: %v", pt)
+		log.Printf("3º resultado calibrado: %v", r)
 		SaveConfig()
 		runCalibStep5()
 	})
@@ -187,16 +292,18 @@ func runCalibStep7() {
 
 func runCalibStep8() {
 	calibStepNum = 8
-	StartCalibration("Nome do Item — arraste sobre a área do nome do item", func(r image.Rectangle) {
+	StartCalibration("Nome do Item — arraste sobre a área do nome do item (após clicar)", func(r image.Rectangle) {
 		GlobalScanner.ItemNameRect = r
 		GlobalScanner.HasNameCalib = true
 		log.Printf("Nome do item calibrado: %v", r)
 		SaveConfig()
+		endCalibSession()
 		log.Println("Calibração completa!")
 	})
 }
 
 func StartPriceCalibration() {
+	beginCalibSession(true)
 	calibStepNum = 0
 	calibTotalSteps = 2
 	StartCalibration("coluna QUANTIDADE (ex: '1', '10'...)", func(qtyRect image.Rectangle) {
@@ -208,6 +315,7 @@ func StartPriceCalibration() {
 			GlobalScanner.HasSplitCalib = true
 			GlobalScanner.IsCalibrated = true
 			SaveConfig()
+			endCalibSession()
 			log.Printf("Coluna de preço definida: %v", priceRect)
 			go func() {
 				price, err := GlobalScanner.CapturePrice()
@@ -222,12 +330,14 @@ func StartPriceCalibration() {
 }
 
 func StartItemNameCalibration() {
+	beginCalibSession(false)
 	calibStepNum = 0
 	calibTotalSteps = 1
 	StartCalibration("nome do item", func(r image.Rectangle) {
 		GlobalScanner.ItemNameRect = r
 		GlobalScanner.HasNameCalib = true
 		SaveConfig()
+		endCalibSession()
 		log.Printf("Área de nome definida: %v", r)
 		go func() {
 			name, err := GlobalScanner.CaptureItemName()
@@ -241,6 +351,21 @@ func StartItemNameCalibration() {
 }
 
 func calibratorLoop() {
+	// Estado de espera: screenshot ainda não foi capturado. Mostra tela preta.
+	if calibPending && !calibActive {
+		imgui.PushStyleVarVec2(imgui.StyleVarWindowPadding, imgui.Vec2{X: 0, Y: 0})
+		imgui.PushStyleColorVec4(imgui.ColWindowBg, imgui.Vec4{X: 0, Y: 0, Z: 0, W: 1})
+		g.SingleWindow().Flags(
+			g.WindowFlags(imgui.WindowFlagsNoTitleBar) |
+				g.WindowFlags(imgui.WindowFlagsNoDecoration) |
+				g.WindowFlags(imgui.WindowFlagsNoMove) |
+				g.WindowFlags(imgui.WindowFlagsNoScrollbar),
+		).Layout()
+		imgui.PopStyleColor()
+		imgui.PopStyleVar()
+		return
+	}
+
 	io := imgui.CurrentIO()
 	mousePos := io.MousePos()
 	dispSize := io.DisplaySize()
@@ -256,12 +381,8 @@ func calibratorLoop() {
 			g.WindowFlags(imgui.WindowFlagsNoScrollWithMouse),
 	).Layout(
 		g.Custom(func() {
-			avail := imgui.ContentRegionAvail()
-
 			if calibPhysW > 0 && calibPhysH > 0 {
-				sx := avail.X / float32(calibPhysW)
-				sy := avail.Y / float32(calibPhysH)
-				calibScreenTex.ToImageWidget().Scale(sx, sy).Build()
+				calibScreenTex.ToImageWidget().Size(dispSize.X, dispSize.Y).Build()
 				calibImgMin = imgui.ItemRectMin()
 				calibImgMax = imgui.ItemRectMax()
 			}
@@ -304,14 +425,14 @@ func calibratorLoop() {
 				done bool
 			}
 			steps := []calibStep{
-				{"Busca",       GlobalScanner.HasSearchBar},
-				{"1º Result",   GlobalScanner.FirstResult != image.Point{}},
-				{"2º Result",   GlobalScanner.HasSecondResult},
-				{"3º Result",   GlobalScanner.HasThirdResult},
+				{"Busca",      GlobalScanner.HasSearchBar},
+				{"1º Result",  GlobalScanner.FirstResult != image.Rectangle{}},
+				{"2º Result",  GlobalScanner.HasSecondResult},
+				{"3º Result",  GlobalScanner.HasThirdResult},
 				{"Fechar Item", GlobalScanner.HasCloseItem},
-				{"Quantidade",  GlobalScanner.HasSplitCalib},
-				{"Preço",       GlobalScanner.HasSplitCalib},
-				{"Nome",        GlobalScanner.HasNameCalib},
+				{"Quantidade", GlobalScanner.HasSplitCalib},
+				{"Preço",      GlobalScanner.HasSplitCalib},
+				{"Nome",       GlobalScanner.HasNameCalib},
 			}
 			ox := mousePos.X + 14
 			oy := mousePos.Y + 14
@@ -437,6 +558,8 @@ func finishCalibration() {
 	imgH := calibImgMax.Y - calibImgMin.Y
 	if imgW == 0 || imgH == 0 || calibPhysW == 0 || calibPhysH == 0 {
 		log.Println("Calibração inválida, tente novamente")
+		calibPending = false
+		endCalibSession()
 		restoreWindow()
 		return
 	}
@@ -449,6 +572,18 @@ func finishCalibration() {
 	x2 := int((clamp32(calibDragEnd.X, calibImgMin.X, calibImgMax.X) - calibImgMin.X) * scaleX)
 	y2 := int((clamp32(calibDragEnd.Y, calibImgMin.Y, calibImgMax.Y) - calibImgMin.Y) * scaleY)
 
+	// Corrige escala DPI: no Windows com HiDPI, GetDisplayBounds retorna pixels físicos
+	// enquanto robotgo.Move() espera pixels lógicos (SM_CXSCREEN). No macOS ambos usam
+	// CGDisplayBounds (lógico), então logW == calibPhysW e a correção é no-op.
+	logW, logH := robotgo.GetScreenSize()
+	if calibPhysW > 0 && logW > 0 && calibPhysW != logW {
+		x1 = x1 * logW / calibPhysW
+		y1 = y1 * logH / calibPhysH
+		x2 = x2 * logW / calibPhysW
+		y2 = y2 * logH / calibPhysH
+		log.Printf("Correção DPI aplicada (fator %.2fx): coords físicas→lógicas", float64(calibPhysW)/float64(logW))
+	}
+
 	if x1 > x2 {
 		x1, x2 = x2, x1
 	}
@@ -459,7 +594,8 @@ func finishCalibration() {
 	// Para modo área, rejeita seleções muito pequenas
 	if !calibIsPoint && (x2-x1 < 5 || y2-y1 < 5) {
 		log.Println("Área muito pequena, tente novamente")
-		calibActive = false
+		calibPending = false
+		endCalibSession()
 		restoreWindow()
 		return
 	}
@@ -473,8 +609,16 @@ func finishCalibration() {
 	rect := image.Rect(x1, y1, x2, y2)
 	log.Printf("Área selecionada: (%d,%d)-(%d,%d)", x1, y1, x2, y2)
 
-	restoreWindow()
-	g.Update()
+	hasNextStep := calibTotalSteps > 0 && calibStepNum < calibTotalSteps
+	if !hasNextStep {
+		calibPending = false
+		endCalibSession()
+		restoreWindow()
+		g.Update()
+	} else {
+		// Mantém a tela de calibração visível enquanto o próximo passo é preparado.
+		calibPending = true
+	}
 
 	if calibOnDone != nil {
 		calibOnDone(rect)
@@ -484,8 +628,10 @@ func finishCalibration() {
 func cancelCalibration() {
 	calibIsDragging = false
 	calibActive = false
+	calibPending = false
 	calibStepNum = 0
 	calibTotalSteps = 0
+	endCalibSession()
 	restoreWindow()
 	g.Update()
 	log.Println("Calibração cancelada")
