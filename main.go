@@ -173,8 +173,11 @@ func langSetupLayout() *g.RowWidget {
 		imgui.PushStyleVarVec2(imgui.StyleVarSelectableTextAlign, imgui.Vec2{0.5, 0.0})
 		g.ListBox(AppSupportedLanguages.Langs()).Size(-1, 100).SelectedIndex(AppSupportedLanguages.SelectedIndex()).OnChange(func(idx int) {
 			langs := AppSupportedLanguages.Langs()
-			GetDatas(AppSupportedLanguages.CountryCode(langs[idx]))
+			cc := AppSupportedLanguages.CountryCode(langs[idx])
+			language = cc
+			GetDatas(cc)
 			initialized = true
+			SaveConfig()
 		}).Build()
 		imgui.PopStyleVar()
 	},
@@ -252,6 +255,61 @@ func loop() {
 		).Layout(
 			titleBarLayout(),
 			g.TabBar().TabItems(
+				g.TabItem("Market").Layout(
+					g.Row(
+						g.Label("Servidor:"),
+						g.Combo("##server", dbServer, ServerList, &dbServerIndex).
+							Size(180).
+							OnChange(func() {
+								if int(dbServerIndex) >= 0 && int(dbServerIndex) < len(ServerList) {
+									dbServer = ServerName(ServerList[dbServerIndex])
+									SaveConfig()
+								}
+							}),
+					),
+					g.Label("Items (one per line):"),
+					g.InputTextMultiline(&itemsToScan).Size(-1, 60),
+					g.Row(
+						g.Button("Calibrar").Disabled(calibActive).OnClick(func() {
+							go StartFullCalibration()
+						}),
+						g.Button(func() string {
+							if isScanning {
+								if shouldStopMarketScan() {
+									return "Stopping..."
+								}
+								return "Stop Scan"
+							}
+							return "Start Scan"
+						}()).Disabled(!isScanning && !GlobalScanner.IsCalibrated).OnClick(func() {
+							if isScanning {
+								requestStopMarketScan("botão Stop Scan")
+								return
+							}
+							go startMarketScan()
+						}),
+						g.Button("Limpar").OnClick(func() {
+							scanResults = []ScanResult{}
+						}),
+					),
+					g.Custom(func() {
+						if GlobalScanner.IsCalibrated {
+							imgui.SeparatorText("Preview")
+							pricePreviewTexture.ToImageWidget().Scale(1.0, 1.0).Build()
+						}
+					}),
+					g.Custom(func() {
+						if len(scanResults) > 0 {
+							imgui.SeparatorText("Results")
+							for _, res := range scanResults {
+								g.Label(res.Name).Build()
+								for _, t := range res.Prices {
+									g.Label(fmt.Sprintf("  x%-6d %d kamas", t.Qty, t.Price)).Build()
+								}
+							}
+						}
+					}),
+				),
 				g.TabItem("Hunt").Layout(
 					headerLayout(),
 					g.Row(
@@ -357,61 +415,6 @@ func loop() {
 					g.Custom(func() {
 						if len(TravelHistory.GetEntries()) > 0 {
 							TravelHistory.Table().Build()
-						}
-					}),
-				),
-				g.TabItem("Market").Layout(
-					g.Label("Items (one per line):"),
-					g.InputTextMultiline(&itemsToScan).Size(-1, 60),
-					g.Row(
-						g.Label("Servidor:"),
-						g.Combo("##server", dbServer, ServerList, &dbServerIndex).
-							Size(180).
-							OnChange(func() {
-								if int(dbServerIndex) >= 0 && int(dbServerIndex) < len(ServerList) {
-									dbServer = ServerName(ServerList[dbServerIndex])
-									SaveConfig()
-								}
-							}),
-					),
-					g.Row(
-						g.Button("Calibrar").Disabled(calibActive).OnClick(func() {
-							go StartFullCalibration()
-						}),
-						g.Button(func() string {
-							if isScanning {
-								if shouldStopMarketScan() {
-									return "Stopping..."
-								}
-								return "Stop Scan"
-							}
-							return "Start Scan"
-						}()).Disabled(!isScanning && !GlobalScanner.IsCalibrated).OnClick(func() {
-							if isScanning {
-								requestStopMarketScan("botão Stop Scan")
-								return
-							}
-							go startMarketScan()
-						}),
-						g.Button("Limpar").OnClick(func() {
-							scanResults = []ScanResult{}
-						}),
-					),
-					g.Custom(func() {
-						if GlobalScanner.IsCalibrated {
-							imgui.SeparatorText("Preview")
-							pricePreviewTexture.ToImageWidget().Scale(1.0, 1.0).Build()
-						}
-					}),
-					g.Custom(func() {
-						if len(scanResults) > 0 {
-							imgui.SeparatorText("Results")
-							for _, res := range scanResults {
-								g.Label(res.Name).Build()
-								for _, t := range res.Prices {
-									g.Label(fmt.Sprintf("  x%-6d %d kamas", t.Qty, t.Price)).Build()
-								}
-							}
 						}
 					}),
 				),

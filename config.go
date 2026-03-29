@@ -27,6 +27,7 @@ type ScannerConfig struct {
 	HasCloseItem    bool       `json:"has_close_item"`
 	HasSearchBar    bool       `json:"has_search_bar"`
 	Server          string     `json:"server,omitempty"`
+	Language        string     `json:"language,omitempty"`
 	WindowX         int        `json:"window_x,omitempty"`
 	WindowY         int        `json:"window_y,omitempty"`
 }
@@ -114,6 +115,7 @@ func SaveConfig() {
 	}
 
 	cfg.Server = dbServer
+	cfg.Language = language
 	if wnd != nil {
 		cfg.WindowX, cfg.WindowY = wnd.GetPos()
 	}
@@ -192,9 +194,22 @@ func LoadConfig() {
 		}
 	}
 
+	if cfg.Language != "" {
+		language = cfg.Language
+		GetDatas(cfg.Language)
+		initialized = true
+		langs := AppSupportedLanguages.Langs()
+		for i, name := range langs {
+			if AppSupportedLanguages.CountryCode(name) == cfg.Language {
+				*AppSupportedLanguages.SelectedIndex() = int32(i)
+				break
+			}
+		}
+	}
+
 	loadedWindowX = cfg.WindowX
 	loadedWindowY = cfg.WindowY
-	log.Printf("Config carregado: %s (price=%v name=%v server=%s pos=%d,%d)", path, cfg.IsCalibrated, cfg.HasNameCalib, cfg.Server, cfg.WindowX, cfg.WindowY)
+	log.Printf("Config carregado: %s (price=%v name=%v server=%s lang=%s pos=%d,%d)", path, cfg.IsCalibrated, cfg.HasNameCalib, cfg.Server, cfg.Language, cfg.WindowX, cfg.WindowY)
 }
 
 var loadedWindowX, loadedWindowY int

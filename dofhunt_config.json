@@ -53,6 +53,7 @@
   "has_close_item": true,
   "has_search_bar": true,
   "server": "Kourial",
-  "window_x": 300,
-  "window_y": 300
+  "language": "pt",
+  "window_x": 570,
+  "window_y": 336
 }
