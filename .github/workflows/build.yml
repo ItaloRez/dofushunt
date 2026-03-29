@@ -22,7 +22,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          brew install tesseract pkg-config
+          brew install tesseract leptonica pkg-config
 
       - name: Create .env from Secrets
         run: |
@@ -35,7 +35,11 @@ jobs:
       - name: Build
         run: |
           mkdir -p dist
-          GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/dofhunt .
+          export CGO_CFLAGS="-I$(brew --prefix)/include"
+          export CGO_CXXFLAGS="-I$(brew --prefix)/include"
+          export CGO_LDFLAGS="-L$(brew --prefix)/lib"
+          export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w" -o dist/dofhunt .
 
       - name: Package
         run: |
@@ -54,22 +58,27 @@ jobs:
   build-windows:
     name: Build Windows (AMD64)
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CGO_ENABLED: 1
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
         with:
-          go-version: '1.23'
-          cache: true
-
-      - name: Install vcpkg Dependencies
-        uses: microsoft/vcpkg-action@v1
-        with:
-          pkgs: tesseract leptonica
-          triplet: x64-windows-static
-          cache: true
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-tesseract-ocr
+            mingw-w64-x86_64-leptonica
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-go
+            zip
 
       - name: Create .env from Secrets
         shell: bash
@@ -81,33 +90,29 @@ jobs:
           echo "SHADOW_DATABASE_URL=${{ secrets.SHADOW_DATABASE_URL }}" >> .env
 
       - name: Install go-winres
+        shell: bash
         run: go install github.com/tc-hib/go-winres@latest
 
       - name: Generate Windows Resources
+        shell: bash
         run: |
-          $env:Path += ";$(go env GOPATH)\bin"
+          export PATH="$PATH:$(go env GOPATH)/bin"
           go-winres make
 
       - name: Build
         shell: bash
         run: |
-          # Configure CGO for vcpkg
-          export VCPKG_INSTALLED_ROOT="${{ github.workspace }}/vcpkg_installed/x64-windows-static"
-          export CGO_CFLAGS="-I$VCPKG_INSTALLED_ROOT/include"
-          export CGO_LDFLAGS="-L$VCPKG_INSTALLED_ROOT/lib -ltesseract50 -lleptonica-1.82.0 -lws2_32" 
-          # Note: filenames might vary slightly depending on vcpkg version. 
-          # We'll use more generic flags if possible or try to find them.
-          
           mkdir -p build-win
           go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui -extldflags=-static" .
 
       - name: Package
-        shell: pwsh
+        shell: bash
         run: |
-          Copy-Item "clues.json" "build-win/"
-          Copy-Item ".env" "build-win/"
-          Copy-Item -Recurse "install" "build-win/"
-          Compress-Archive -Path "build-win/*" -DestinationPath "dofushunt-windows-amd64.zip"
+          cp clues.json build-win/
+          cp .env build-win/
+          cp -r install build-win/
+          cd build-win
+          zip -r ../dofushunt-windows-amd64.zip .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
