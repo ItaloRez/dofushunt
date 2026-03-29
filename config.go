@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 type ScannerConfig struct {
@@ -45,31 +44,37 @@ type RectJSON struct {
 }
 
 func configPath() string {
-	// Salva ao lado do executável
 	exe, err := os.Executable()
 	if err != nil {
-		// Fallback: diretório de trabalho
-		return "dofhunt_config.json"
-	}
-	// Se rodando via "go run .", o executável está em /tmp — usa cwd
-	if runtime.GOOS != "windows" {
-		dir := filepath.Dir(exe)
-		if filepath.Base(dir) == "dofhunt" || filepath.Base(dir) == "." {
-			return filepath.Join(dir, "dofhunt_config.json")
-		}
-	}
-	// Verifica se estamos num temp dir (go run .)
-	dir := filepath.Dir(exe)
-	if isTemp(dir) {
 		cwd, _ := os.Getwd()
 		return filepath.Join(cwd, "dofhunt_config.json")
 	}
+
+	dir := filepath.Dir(exe)
+
+	// Detecta go run / build cache: qualquer path fora de um diretório "normal"
+	// inclui /tmp, os.TempDir(), e o cache do Go (~/Library/Caches/go-build no macOS).
+	cacheDir, _ := os.UserCacheDir() // ~/Library/Caches no macOS, ~/.cache no Linux
+	if isTransientDir(dir, cacheDir) {
+		cwd, _ := os.Getwd()
+		return filepath.Join(cwd, "dofhunt_config.json")
+	}
+
 	return filepath.Join(dir, "dofhunt_config.json")
 }
 
-func isTemp(dir string) bool {
+// isTransientDir retorna true se dir for um diretório temporário ou de cache de build.
+func isTransientDir(dir, cacheDir string) bool {
 	tmp := os.TempDir()
-	return len(dir) >= len(tmp) && dir[:len(tmp)] == tmp
+	for _, base := range []string{tmp, cacheDir} {
+		if base == "" {
+			continue
+		}
+		if len(dir) >= len(base) && dir[:len(base)] == base {
+			return true
+		}
+	}
+	return false
 }
 
 func SaveConfig() {

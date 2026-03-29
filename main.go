@@ -652,16 +652,51 @@ func startMarketScan() {
 				log.Printf("Scan: resultado %d bate, clicando", i+1)
 				candidates[i].click()
 				scanResult := captureResult(searched, prevName, candidates[i].retry)
+				if scanResult == nil {
+					break
+				}
+				// Verifica se o painel abriu o item correto
+				if GlobalScanner.HasNameCalib && !namesMatch(searched, scanResult.Name) {
+					log.Printf("Scan: painel abriu '%s' mas buscado era '%s', fechando e retentando", scanResult.Name, searched)
+					if GlobalScanner.HasCloseItem {
+						GlobalScanner.ClickCloseItem()
+					}
+					if shouldStopMarketScan() {
+						return nil, false
+					}
+					candidates[i].click()
+					scanResult = captureResult(searched, scanResult.Name, candidates[i].retry)
+				}
 				if scanResult != nil {
 					return scanResult, false
 				}
-				// captureResult falhou mesmo com nome correto — agenda retry
 				break
 			}
 		}
 
+		// OCR não encontrou nenhum resultado compatível — tenta clicar em cada um na ordem.
+		log.Printf("Scan: '%s' não encontrado via OCR, tentando clicar em cada resultado", searched)
+		for i := range candidates {
+			if shouldStopMarketScan() {
+				return nil, false
+			}
+			log.Printf("Scan: fallback clicando resultado %d", i+1)
+			candidates[i].click()
+			scanResult := captureResult(searched, prevName, candidates[i].retry)
+			if scanResult == nil {
+				continue
+			}
+			if !GlobalScanner.HasNameCalib || namesMatch(searched, scanResult.Name) {
+				return scanResult, false
+			}
+			log.Printf("Scan: fallback resultado %d='%s' não bate, fechando", i+1, scanResult.Name)
+			if GlobalScanner.HasCloseItem {
+				GlobalScanner.ClickCloseItem()
+			}
+		}
+
 		if !isRetryPass {
-			log.Printf("Scan: '%s' não encontrado nos resultados, agendando para retry", searched)
+			log.Printf("Scan: '%s' não encontrado em nenhum resultado, agendando para retry", searched)
 			return nil, true
 		}
 		return nil, false
