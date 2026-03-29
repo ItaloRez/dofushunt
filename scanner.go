@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/png"
 	"log"
-	"math/rand"
 	"os"
 	"regexp"
 	"strconv"
@@ -110,57 +109,32 @@ func (s *MarketScanner) SearchItem(name string) {
 		return
 	}
 
-	cx := (s.SearchBarRect.Min.X + s.SearchBarRect.Max.X) / 2
 	cy := (s.SearchBarRect.Min.Y + s.SearchBarRect.Max.Y) / 2
+	rightX := s.SearchBarRect.Max.X - 12
 
-	if s.searchBarHasText() {
-		if shouldStopMarketScan() {
-			return
-		}
-		// Tem texto: mover para a direita do input (onde fica o X), pausar e clicar
-		rightX := s.SearchBarRect.Max.X - 12
-		MoveHumanLike(rightX, cy)
-		time.Sleep(time.Duration(randRange(200, 450)) * time.Millisecond)
-		if shouldStopMarketScan() {
-			return
-		}
-		ClickHumanLike()
-		time.Sleep(time.Duration(randRange(250, 450)) * time.Millisecond)
+	// Clica no X (direita do input) — limpa texto anterior e foca o campo.
+	// Inofensivo se o campo já estiver vazio.
+	MoveHumanLike(rightX, cy)
+	if shouldStopMarketScan() {
+		return
+	}
+	ClickHumanLike()
+	time.Sleep(time.Duration(randRange(200, 350)) * time.Millisecond)
+
+	if shouldStopMarketScan() {
+		return
+	}
+	if strings.Contains(name, " ") {
+		// Nome com múltiplas palavras: digita tudo de uma vez (sem delays por caractere)
+		mainthread.Call(func() {
+			robotgo.TypeStr(name)
+		})
+		time.Sleep(time.Duration(randRange(150, 300)) * time.Millisecond)
 	} else {
-		if shouldStopMarketScan() {
-			return
-		}
-		// Campo vazio: um clique simples para focar
-		MoveHumanLike(cx, cy)
-		if shouldStopMarketScan() {
-			return
-		}
-		ClickHumanLike()
-		time.Sleep(time.Duration(randRange(200, 350)) * time.Millisecond)
+		TypeHumanLike(name)
 	}
-
-	// 15% de chance de um clique extra (simulando erro humano)
-	if !shouldStopMarketScan() && rand.Float64() < 0.15 {
-		time.Sleep(time.Duration(randRange(100, 300)) * time.Millisecond)
-		if shouldStopMarketScan() {
-			return
-		}
-		ClickHumanLike()
-		time.Sleep(200 * time.Millisecond)
-	}
-
-	if shouldStopMarketScan() {
-		return
-	}
-	TypeHumanLike(name)
-	if shouldStopMarketScan() {
-		return
-	}
-	mainthread.Call(func() {
-		robotgo.KeyTap("enter")
-	})
 	// Aguarda os resultados carregarem antes de clicar (tempo variável)
-	time.Sleep(time.Duration(randRange(1200, 2200)) * time.Millisecond)
+	time.Sleep(time.Duration(randRange(2000, 3200)) * time.Millisecond)
 }
 
 func clickResultRect(r image.Rectangle) {
@@ -252,9 +226,7 @@ func (s *MarketScanner) ClickCloseItem() {
 	}
 	log.Println("Closing item")
 	MoveHumanLike(s.CloseItem.X, s.CloseItem.Y)
-	if shouldStopMarketScan() {
-		return
-	}
+	// Sem check de stop aqui: uma vez que moveu até o fechar, sempre clica.
 	ClickHumanLike()
 	time.Sleep(time.Duration(randRange(300, 600)) * time.Millisecond)
 }
