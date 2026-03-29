@@ -96,7 +96,7 @@ jobs:
 
       - name: Build
         run: |
-          mkdir -p build-win
+          mkdir -p build/release-windows
           export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
           
           # CRAZY LINKER TRICK:
@@ -106,26 +106,35 @@ jobs:
           cp /mingw64/lib/libtesseract.dll.a /mingw64/lib/libtesseract.a
           cp /mingw64/lib/libleptonica.dll.a /mingw64/lib/libleptonica.a
           
-          go build -o build-win/dofhunt.exe -ldflags "-s -w -H=windowsgui" .
+          go build -o build/release-windows/dofhunt.exe -ldflags "-s -w -H=windowsgui" .
 
       - name: Bundle Runtime Dependencies
         run: |
           # Copy all required dynamic libraries (Tesseract, Robotgo, libgcc) from MSYS2
-          ldd build-win/dofhunt.exe | grep /mingw64/bin/ | awk '{print $3}' | xargs -I '{}' cp '{}' build-win/
+          ldd build/release-windows/dofhunt.exe | grep /mingw64/bin/ | awk '{print $3}' | xargs -I '{}' cp '{}' build/release-windows/
 
       - name: Package
         run: |
-          cp clues.json build-win/
-          cp .env build-win/
-          cp -r install build-win/
-          cd build-win
-          zip -r ../dofushunt-windows-amd64.zip .
+          cp clues.json build/release-windows/
+          cp .env build/release-windows/
+          cp .env.example build/release-windows/ || true
+          mkdir -p build/release-windows/install-windows
+          cp -r install/windows/* build/release-windows/install-windows/
+          cd build/release-windows
+          zip -r ../../dofushunt-windows-amd64.zip .
 
-      - name: Upload Artifact
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/windows/dofhunt.iss
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dofushunt-windows-amd64
-          path: dofushunt-windows-amd64.zip
+          path: |
+            dofushunt-windows-amd64.zip
+            build/dofhunt-installer-windows.exe
 
   release:
     name: Publish Release
@@ -144,9 +153,9 @@ jobs:
         with:
           tag: nightly
           name: "Nightly Build (main)"
-          body: "Compilação automática mais recente da branch main.\n\nBaixe o arquivo `.zip` correspondente ao seu sistema operacional abaixo."
+          body: "Compilação automática mais recente da branch main.\n\nBaixe o instalador `.exe` (recomendado) ou o arquivo `.zip` abaixo."
           allowUpdates: true
           replacesArtifacts: true
           prerelease: true
-          artifacts: "artifacts/*/*.zip"
+          artifacts: "artifacts/*/*.zip,artifacts/*/*.exe"
 
