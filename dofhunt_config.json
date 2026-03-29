@@ -1,25 +1,25 @@
 {
   "search_bar_rect": {
-    "x1": 442,
-    "y1": 232,
-    "x2": 647,
-    "y2": 329
+    "x1": 466,
+    "y1": 264,
+    "x2": 643,
+    "y2": 289
   },
   "first_result": {
-    "x": 717,
-    "y": 330
+    "x": 731,
+    "y": 329
   },
   "second_result": {
-    "x": 741,
-    "y": 385
+    "x": 734,
+    "y": 387
   },
   "third_result": {
-    "x": 733,
-    "y": 444
+    "x": 741,
+    "y": 461
   },
   "close_item": {
-    "x": 405,
-    "y": 259
+    "x": 395,
+    "y": 262
   },
   "price_area": {
     "x1": 119,
@@ -28,22 +28,22 @@
     "y2": 459
   },
   "qty_col_rect": {
-    "x1": 119,
-    "y1": 425,
-    "x2": 183,
-    "y2": 460
+    "x1": 126,
+    "y1": 328,
+    "x2": 203,
+    "y2": 375
   },
   "price_col_rect": {
-    "x1": 183,
-    "y1": 428,
-    "x2": 304,
-    "y2": 459
+    "x1": 225,
+    "y1": 326,
+    "x2": 357,
+    "y2": 361
   },
   "item_name_rect": {
-    "x1": 143,
-    "y1": 276,
-    "x2": 417,
-    "y2": 308
+    "x1": 142,
+    "y1": 227,
+    "x2": 327,
+    "y2": 270
   },
   "is_calibrated": true,
   "has_name_calib": true,
@@ -52,5 +52,7 @@
   "has_split_calib": true,
   "has_close_item": true,
   "has_search_bar": true,
-  "server": "Kourial"
+  "server": "Kourial",
+  "window_x": 300,
+  "window_y": 300
 }

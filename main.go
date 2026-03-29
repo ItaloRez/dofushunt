@@ -218,7 +218,7 @@ func filterClues(filter *string) {
 }
 
 func loop() {
-	if calibActive {
+	if calibActive || calibPending {
 		calibratorLoop()
 		return
 	}

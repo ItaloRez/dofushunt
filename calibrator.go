@@ -18,6 +18,7 @@ import (
 
 var (
 	calibActive       bool
+	calibPending      bool // true enquanto screenshot está sendo capturado (UI principal oculta)
 	calibScreenTex    = &g.ReflectiveBoundTexture{}
 	calibPhysW        int
 	calibPhysH        int
@@ -126,6 +127,17 @@ func getDofusWindowPos() (x, y int, ok bool) {
 
 func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 	go func() {
+		// Oculta a UI principal imediatamente, antes de tirar o screenshot.
+		mainthread.Call(func() {
+			// Salva posição/tamanho apenas no primeiro passo da sequência (antes de calibPending ser true).
+			if !calibActive && !calibPending {
+				savedWndX, savedWndY = wnd.GetPos()
+				savedWndW, savedWndH = wnd.GetSize()
+			}
+			calibPending = true
+		})
+		g.Update()
+
 		// Em sequência de calibração, evita alternar foco toda hora para reduzir flick.
 		if !calibSessionPinned || calibSessionDisplay < 0 {
 			mainthread.Call(focusDofus)
@@ -158,6 +170,11 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 		img, err := screenshot.CaptureRect(bounds)
 		if err != nil {
 			log.Printf("Falha ao capturar tela: %v", err)
+			mainthread.Call(func() {
+				calibPending = false
+				restoreWindow()
+			})
+			g.Update()
 			return
 		}
 
@@ -165,11 +182,6 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 		log.Printf("Display %d | Tela lógica: %dx%d | Screenshot físico: %dx%d", displayIdx, screenW, screenH, bounds.Dx(), bounds.Dy())
 
 		mainthread.Call(func() {
-			// Salva posição/tamanho apenas no primeiro passo da sequência
-			if !calibActive {
-				savedWndX, savedWndY = wnd.GetPos()
-				savedWndW, savedWndH = wnd.GetSize()
-			}
 			calibPhysW = bounds.Dx()
 			calibPhysH = bounds.Dy()
 			calibScreenTex.SetSurfaceFromRGBA(img, false)
@@ -178,6 +190,7 @@ func startCalibBase(title string, isPoint bool, onDone func(image.Rectangle)) {
 			calibTitle = title
 			calibIsPoint = isPoint
 			calibOnDone = onDone
+			calibPending = false
 			calibActive = true
 			wnd.SetPos(bounds.Min.X, bounds.Min.Y)
 			wnd.SetSize(bounds.Dx(), bounds.Dy())
@@ -338,6 +351,21 @@ func StartItemNameCalibration() {
 }
 
 func calibratorLoop() {
+	// Estado de espera: screenshot ainda não foi capturado. Mostra tela preta.
+	if calibPending && !calibActive {
+		imgui.PushStyleVarVec2(imgui.StyleVarWindowPadding, imgui.Vec2{X: 0, Y: 0})
+		imgui.PushStyleColorVec4(imgui.ColWindowBg, imgui.Vec4{X: 0, Y: 0, Z: 0, W: 1})
+		g.SingleWindow().Flags(
+			g.WindowFlags(imgui.WindowFlagsNoTitleBar) |
+				g.WindowFlags(imgui.WindowFlagsNoDecoration) |
+				g.WindowFlags(imgui.WindowFlagsNoMove) |
+				g.WindowFlags(imgui.WindowFlagsNoScrollbar),
+		).Layout()
+		imgui.PopStyleColor()
+		imgui.PopStyleVar()
+		return
+	}
+
 	io := imgui.CurrentIO()
 	mousePos := io.MousePos()
 	dispSize := io.DisplaySize()
@@ -530,7 +558,7 @@ func finishCalibration() {
 	imgH := calibImgMax.Y - calibImgMin.Y
 	if imgW == 0 || imgH == 0 || calibPhysW == 0 || calibPhysH == 0 {
 		log.Println("Calibração inválida, tente novamente")
-		calibActive = false
+		calibPending = false
 		endCalibSession()
 		restoreWindow()
 		return
@@ -566,7 +594,7 @@ func finishCalibration() {
 	// Para modo área, rejeita seleções muito pequenas
 	if !calibIsPoint && (x2-x1 < 5 || y2-y1 < 5) {
 		log.Println("Área muito pequena, tente novamente")
-		calibActive = false
+		calibPending = false
 		endCalibSession()
 		restoreWindow()
 		return
@@ -583,9 +611,13 @@ func finishCalibration() {
 
 	hasNextStep := calibTotalSteps > 0 && calibStepNum < calibTotalSteps
 	if !hasNextStep {
+		calibPending = false
 		endCalibSession()
 		restoreWindow()
 		g.Update()
+	} else {
+		// Mantém a tela de calibração visível enquanto o próximo passo é preparado.
+		calibPending = true
 	}
 
 	if calibOnDone != nil {
@@ -596,6 +628,7 @@ func finishCalibration() {
 func cancelCalibration() {
 	calibIsDragging = false
 	calibActive = false
+	calibPending = false
 	calibStepNum = 0
 	calibTotalSteps = 0
 	endCalibSession()
