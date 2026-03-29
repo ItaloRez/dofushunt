@@ -228,9 +228,9 @@ func runCalibStep1() {
 
 func runCalibStep2() {
 	calibStepNum = 2
-	StartCalibrationPoint("1º Resultado — clique sobre o primeiro item da lista", func(pt image.Point) {
-		GlobalScanner.FirstResult = pt
-		log.Printf("1º resultado calibrado: %v", pt)
+	StartCalibration("1º Resultado — arraste sobre o nome do primeiro item da lista", func(r image.Rectangle) {
+		GlobalScanner.FirstResult = r
+		log.Printf("1º resultado calibrado: %v", r)
 		SaveConfig()
 		runCalibStep3()
 	})
@@ -238,10 +238,10 @@ func runCalibStep2() {
 
 func runCalibStep3() {
 	calibStepNum = 3
-	StartCalibrationPoint("2º Resultado — clique sobre o segundo item da lista", func(pt image.Point) {
-		GlobalScanner.SecondResult = pt
+	StartCalibration("2º Resultado — arraste sobre o nome do segundo item da lista", func(r image.Rectangle) {
+		GlobalScanner.SecondResult = r
 		GlobalScanner.HasSecondResult = true
-		log.Printf("2º resultado calibrado: %v", pt)
+		log.Printf("2º resultado calibrado: %v", r)
 		SaveConfig()
 		runCalibStep4()
 	})
@@ -249,10 +249,10 @@ func runCalibStep3() {
 
 func runCalibStep4() {
 	calibStepNum = 4
-	StartCalibrationPoint("3º Resultado — clique sobre o terceiro item da lista", func(pt image.Point) {
-		GlobalScanner.ThirdResult = pt
+	StartCalibration("3º Resultado — arraste sobre o nome do terceiro item da lista", func(r image.Rectangle) {
+		GlobalScanner.ThirdResult = r
 		GlobalScanner.HasThirdResult = true
-		log.Printf("3º resultado calibrado: %v", pt)
+		log.Printf("3º resultado calibrado: %v", r)
 		SaveConfig()
 		runCalibStep5()
 	})
@@ -292,7 +292,7 @@ func runCalibStep7() {
 
 func runCalibStep8() {
 	calibStepNum = 8
-	StartCalibration("Nome do Item — arraste sobre a área do nome do item", func(r image.Rectangle) {
+	StartCalibration("Nome do Item — arraste sobre a área do nome do item (após clicar)", func(r image.Rectangle) {
 		GlobalScanner.ItemNameRect = r
 		GlobalScanner.HasNameCalib = true
 		log.Printf("Nome do item calibrado: %v", r)
@@ -425,14 +425,14 @@ func calibratorLoop() {
 				done bool
 			}
 			steps := []calibStep{
-				{"Busca",       GlobalScanner.HasSearchBar},
-				{"1º Result",   GlobalScanner.FirstResult != image.Point{}},
-				{"2º Result",   GlobalScanner.HasSecondResult},
-				{"3º Result",   GlobalScanner.HasThirdResult},
+				{"Busca",      GlobalScanner.HasSearchBar},
+				{"1º Result",  GlobalScanner.FirstResult != image.Rectangle{}},
+				{"2º Result",  GlobalScanner.HasSecondResult},
+				{"3º Result",  GlobalScanner.HasThirdResult},
 				{"Fechar Item", GlobalScanner.HasCloseItem},
-				{"Quantidade",  GlobalScanner.HasSplitCalib},
-				{"Preço",       GlobalScanner.HasSplitCalib},
-				{"Nome",        GlobalScanner.HasNameCalib},
+				{"Quantidade", GlobalScanner.HasSplitCalib},
+				{"Preço",      GlobalScanner.HasSplitCalib},
+				{"Nome",       GlobalScanner.HasNameCalib},
 			}
 			ox := mousePos.X + 14
 			oy := mousePos.Y + 14

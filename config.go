@@ -11,9 +11,9 @@ import (
 
 type ScannerConfig struct {
 	SearchBarRect   *RectJSON  `json:"search_bar_rect,omitempty"`
-	FirstResult     *PointJSON `json:"first_result,omitempty"`
-	SecondResult    *PointJSON `json:"second_result,omitempty"`
-	ThirdResult     *PointJSON `json:"third_result,omitempty"`
+	FirstResult     *RectJSON  `json:"first_result,omitempty"`
+	SecondResult    *RectJSON  `json:"second_result,omitempty"`
+	ThirdResult     *RectJSON  `json:"third_result,omitempty"`
 	CloseItem       *PointJSON `json:"close_item,omitempty"`
 	PriceArea       *RectJSON  `json:"price_area,omitempty"`
 	QtyColRect      *RectJSON  `json:"qty_col_rect,omitempty"`
@@ -83,15 +83,18 @@ func SaveConfig() {
 		cfg.SearchBarRect = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
 		cfg.HasSearchBar = true
 	}
-	if GlobalScanner.FirstResult != (image.Point{}) {
-		cfg.FirstResult = &PointJSON{X: GlobalScanner.FirstResult.X, Y: GlobalScanner.FirstResult.Y}
+	if GlobalScanner.FirstResult != (image.Rectangle{}) {
+		r := GlobalScanner.FirstResult
+		cfg.FirstResult = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
 	}
 	if GlobalScanner.HasSecondResult {
-		cfg.SecondResult = &PointJSON{X: GlobalScanner.SecondResult.X, Y: GlobalScanner.SecondResult.Y}
+		r := GlobalScanner.SecondResult
+		cfg.SecondResult = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
 		cfg.HasSecondResult = true
 	}
 	if GlobalScanner.HasThirdResult {
-		cfg.ThirdResult = &PointJSON{X: GlobalScanner.ThirdResult.X, Y: GlobalScanner.ThirdResult.Y}
+		r := GlobalScanner.ThirdResult
+		cfg.ThirdResult = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
 		cfg.HasThirdResult = true
 	}
 	if GlobalScanner.HasCloseItem {
@@ -113,7 +116,6 @@ func SaveConfig() {
 		r := GlobalScanner.ItemNameRect
 		cfg.ItemNameRect = &RectJSON{X1: r.Min.X, Y1: r.Min.Y, X2: r.Max.X, Y2: r.Max.Y}
 	}
-
 	cfg.Server = dbServer
 	cfg.Language = language
 	if wnd != nil {
@@ -154,13 +156,13 @@ func LoadConfig() {
 		GlobalScanner.SearchBarRect = image.Rect(cfg.SearchBarRect.X1, cfg.SearchBarRect.Y1, cfg.SearchBarRect.X2, cfg.SearchBarRect.Y2)
 	}
 	if cfg.FirstResult != nil {
-		GlobalScanner.FirstResult = image.Point{X: cfg.FirstResult.X, Y: cfg.FirstResult.Y}
+		GlobalScanner.FirstResult = image.Rect(cfg.FirstResult.X1, cfg.FirstResult.Y1, cfg.FirstResult.X2, cfg.FirstResult.Y2)
 	}
 	if cfg.SecondResult != nil {
-		GlobalScanner.SecondResult = image.Point{X: cfg.SecondResult.X, Y: cfg.SecondResult.Y}
+		GlobalScanner.SecondResult = image.Rect(cfg.SecondResult.X1, cfg.SecondResult.Y1, cfg.SecondResult.X2, cfg.SecondResult.Y2)
 	}
 	if cfg.ThirdResult != nil {
-		GlobalScanner.ThirdResult = image.Point{X: cfg.ThirdResult.X, Y: cfg.ThirdResult.Y}
+		GlobalScanner.ThirdResult = image.Rect(cfg.ThirdResult.X1, cfg.ThirdResult.Y1, cfg.ThirdResult.X2, cfg.ThirdResult.Y2)
 	}
 	if cfg.CloseItem != nil {
 		GlobalScanner.CloseItem = image.Point{X: cfg.CloseItem.X, Y: cfg.CloseItem.Y}

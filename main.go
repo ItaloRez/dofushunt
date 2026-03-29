@@ -559,48 +559,59 @@ func startMarketScan() {
 		if shouldStopMarketScan() {
 			return nil, false
 		}
-		GlobalScanner.ClickFirstResult()
-		scanResult := captureResult(searched, prevName, GlobalScanner.ClickFirstResult)
-		if scanResult == nil {
-			return nil, true
+
+		// Lê os nomes de cada resultado na lista antes de clicar.
+		// Clica apenas no que bater com o item buscado.
+		type candidate struct {
+			name  string
+			click func()
+			retry func()
+		}
+		candidates := []candidate{
+			{click: GlobalScanner.ClickFirstResult, retry: GlobalScanner.ClickFirstResult},
+		}
+		if GlobalScanner.HasSecondResult {
+			candidates = append(candidates, candidate{click: GlobalScanner.ClickSecondResult, retry: GlobalScanner.ClickSecondResult})
+		}
+		if GlobalScanner.HasThirdResult {
+			candidates = append(candidates, candidate{click: GlobalScanner.ClickThirdResult, retry: GlobalScanner.ClickThirdResult})
 		}
 
-		// Verifica se o nome capturado bate com o buscado.
-		nameOk := !GlobalScanner.HasNameCalib || namesMatch(searched, scanResult.Name)
+		resultRects := []image.Rectangle{
+			GlobalScanner.FirstResult,
+			GlobalScanner.SecondResult,
+			GlobalScanner.ThirdResult,
+		}
 
-		// Tenta 2º resultado se nome não bate.
-		if !nameOk && GlobalScanner.HasSecondResult && GlobalScanner.HasNameCalib {
+		for i := range candidates {
 			if shouldStopMarketScan() {
 				return nil, false
 			}
-			GlobalScanner.ClickSecondResult()
-			sr2 := captureResult(searched, scanResult.Name, GlobalScanner.ClickSecondResult)
-			if sr2 != nil {
-				nameOk = namesMatch(searched, sr2.Name)
-				scanResult = sr2
+			rect := resultRects[i]
+			name, err := GlobalScanner.ReadResultName(rect)
+			if err != nil {
+				log.Printf("Scan: erro ao ler nome do resultado %d: %v", i+1, err)
+				continue
+			}
+			candidates[i].name = name
+			log.Printf("Scan: resultado %d='%s' (buscado='%s')", i+1, name, searched)
+			if namesMatch(searched, name) {
+				log.Printf("Scan: resultado %d bate, clicando", i+1)
+				candidates[i].click()
+				scanResult := captureResult(searched, prevName, candidates[i].retry)
+				if scanResult != nil {
+					return scanResult, false
+				}
+				// captureResult falhou mesmo com nome correto — agenda retry
+				break
 			}
 		}
 
-		// Tenta 3º resultado se ainda não bateu.
-		if !nameOk && GlobalScanner.HasThirdResult && GlobalScanner.HasNameCalib {
-			if shouldStopMarketScan() {
-				return nil, false
-			}
-			GlobalScanner.ClickThirdResult()
-			sr3 := captureResult(searched, scanResult.Name, GlobalScanner.ClickThirdResult)
-			if sr3 != nil {
-				nameOk = namesMatch(searched, sr3.Name)
-				scanResult = sr3
-			}
-		}
-
-		// Se nenhum resultado bateu e ainda não é a passagem de retry, agenda para tentar depois.
-		if !nameOk && !isRetryPass {
-			log.Printf("Scan: '%s' não encontrado, agendando para retry", searched)
+		if !isRetryPass {
+			log.Printf("Scan: '%s' não encontrado nos resultados, agendando para retry", searched)
 			return nil, true
 		}
-
-		return scanResult, false
+		return nil, false
 	}
 
 	prevName := ""
