@@ -100,35 +100,62 @@ func (s *MarketScanner) searchBarHasText() bool {
 
 func (s *MarketScanner) SearchItem(name string) {
 	log.Printf("Searching for item: %s", name)
+	if shouldStopMarketScan() {
+		return
+	}
 
 	// Garante foco no Dofus antes de qualquer interação
 	mainthread.Call(focusDofus)
+	if shouldStopMarketScan() {
+		return
+	}
 
 	cx := (s.SearchBarRect.Min.X + s.SearchBarRect.Max.X) / 2
 	cy := (s.SearchBarRect.Min.Y + s.SearchBarRect.Max.Y) / 2
 
 	if s.searchBarHasText() {
+		if shouldStopMarketScan() {
+			return
+		}
 		// Tem texto: mover para a direita do input (onde fica o X), pausar e clicar
 		rightX := s.SearchBarRect.Max.X - 12
 		MoveHumanLike(rightX, cy)
 		time.Sleep(time.Duration(randRange(200, 450)) * time.Millisecond)
+		if shouldStopMarketScan() {
+			return
+		}
 		ClickHumanLike()
 		time.Sleep(time.Duration(randRange(250, 450)) * time.Millisecond)
 	} else {
+		if shouldStopMarketScan() {
+			return
+		}
 		// Campo vazio: um clique simples para focar
 		MoveHumanLike(cx, cy)
+		if shouldStopMarketScan() {
+			return
+		}
 		ClickHumanLike()
 		time.Sleep(time.Duration(randRange(200, 350)) * time.Millisecond)
 	}
 
 	// 15% de chance de um clique extra (simulando erro humano)
-	if rand.Float64() < 0.15 {
+	if !shouldStopMarketScan() && rand.Float64() < 0.15 {
 		time.Sleep(time.Duration(randRange(100, 300)) * time.Millisecond)
+		if shouldStopMarketScan() {
+			return
+		}
 		ClickHumanLike()
 		time.Sleep(200 * time.Millisecond)
 	}
 
+	if shouldStopMarketScan() {
+		return
+	}
 	TypeHumanLike(name)
+	if shouldStopMarketScan() {
+		return
+	}
 	mainthread.Call(func() {
 		robotgo.KeyTap("enter")
 	})
@@ -137,29 +164,53 @@ func (s *MarketScanner) SearchItem(name string) {
 }
 
 func (s *MarketScanner) ClickFirstResult() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Clicking first result")
 	MoveHumanLike(s.FirstResult.X, s.FirstResult.Y)
+	if shouldStopMarketScan() {
+		return
+	}
 	ClickHumanLike()
 	time.Sleep(500 * time.Millisecond)
 }
 
 func (s *MarketScanner) ClickSecondResult() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Clicking second result")
 	MoveHumanLike(s.SecondResult.X, s.SecondResult.Y)
+	if shouldStopMarketScan() {
+		return
+	}
 	ClickHumanLike()
 	time.Sleep(500 * time.Millisecond)
 }
 
 func (s *MarketScanner) ClickThirdResult() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Clicking third result")
 	MoveHumanLike(s.ThirdResult.X, s.ThirdResult.Y)
+	if shouldStopMarketScan() {
+		return
+	}
 	ClickHumanLike()
 	time.Sleep(500 * time.Millisecond)
 }
 
 func (s *MarketScanner) ClickCloseItem() {
+	if shouldStopMarketScan() {
+		return
+	}
 	log.Println("Closing item")
 	MoveHumanLike(s.CloseItem.X, s.CloseItem.Y)
+	if shouldStopMarketScan() {
+		return
+	}
 	ClickHumanLike()
 	time.Sleep(time.Duration(randRange(300, 600)) * time.Millisecond)
 }

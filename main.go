@@ -10,11 +10,13 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AllenDang/cimgui-go/imgui"
 	g "github.com/AllenDang/giu"
 	"github.com/go-vgo/robotgo"
+	hook "github.com/robotn/gohook"
 )
 
 func DecodeEmbedded(data []byte) (*image.RGBA, error) {
@@ -82,9 +84,44 @@ var (
 	itemsToScan        = ""
 	scanResults        = []ScanResult{}
 	isScanning         = false
+	scanStopRequested  atomic.Bool
 	dbServer           = ""
 	dbServerIndex      = int32(-1)
 )
+
+func requestStopMarketScan(source string) {
+	if scanStopRequested.CompareAndSwap(false, true) {
+		log.Printf("Scan: parada solicitada via %s", source)
+		g.Update()
+	}
+}
+
+func shouldStopMarketScan() bool {
+	return scanStopRequested.Load()
+}
+
+func setupMarketStopHotkey() func() {
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			if hook.AddEvent("q") {
+				requestStopMarketScan("tecla Q")
+			}
+		}
+	}()
+
+	log.Println("Hotkey global Q registrada para parar automação")
+	return func() {
+		close(stop)
+		hook.StopEvent()
+	}
+}
 
 type ScanResult struct {
 	Name   string
@@ -341,7 +378,19 @@ func loop() {
 						g.Button("Calibrar").Disabled(calibActive).OnClick(func() {
 							go StartFullCalibration()
 						}),
-						g.Button("Start Scan").Disabled(isScanning || !GlobalScanner.IsCalibrated).OnClick(func() {
+						g.Button(func() string {
+							if isScanning {
+								if shouldStopMarketScan() {
+									return "Stopping..."
+								}
+								return "Stop Scan"
+							}
+							return "Start Scan"
+						}()).Disabled(!isScanning && !GlobalScanner.IsCalibrated).OnClick(func() {
+							if isScanning {
+								requestStopMarketScan("botão Stop Scan")
+								return
+							}
 							go startMarketScan()
 						}),
 						g.Button("Limpar").OnClick(func() {
@@ -477,8 +526,13 @@ func startMarketScan() {
 	if isScanning {
 		return
 	}
+	scanStopRequested.Store(false)
 	isScanning = true
-	defer func() { isScanning = false }()
+	defer func() {
+		isScanning = false
+		scanStopRequested.Store(false)
+		g.Update()
+	}()
 
 	lines := strings.Split(itemsToScan, "\n")
 
@@ -495,7 +549,13 @@ func startMarketScan() {
 	isRetryPass := false
 
 	processItem := func(searched, prevName string) (result *ScanResult, failed bool) {
+		if shouldStopMarketScan() {
+			return nil, false
+		}
 		GlobalScanner.SearchItem(searched)
+		if shouldStopMarketScan() {
+			return nil, false
+		}
 		GlobalScanner.ClickFirstResult()
 		scanResult := captureResult(searched, prevName, GlobalScanner.ClickFirstResult)
 		if scanResult == nil {
@@ -507,6 +567,9 @@ func startMarketScan() {
 
 		// Tenta 2º resultado se nome não bate.
 		if !nameOk && GlobalScanner.HasSecondResult && GlobalScanner.HasNameCalib {
+			if shouldStopMarketScan() {
+				return nil, false
+			}
 			GlobalScanner.ClickSecondResult()
 			sr2 := captureResult(searched, scanResult.Name, GlobalScanner.ClickSecondResult)
 			if sr2 != nil {
@@ -517,6 +580,9 @@ func startMarketScan() {
 
 		// Tenta 3º resultado se ainda não bateu.
 		if !nameOk && GlobalScanner.HasThirdResult && GlobalScanner.HasNameCalib {
+			if shouldStopMarketScan() {
+				return nil, false
+			}
 			GlobalScanner.ClickThirdResult()
 			sr3 := captureResult(searched, scanResult.Name, GlobalScanner.ClickThirdResult)
 			if sr3 != nil {
@@ -536,7 +602,15 @@ func startMarketScan() {
 
 	prevName := ""
 	for _, searched := range queue {
+		if shouldStopMarketScan() {
+			log.Println("Scan: interrompido antes de concluir a fila principal")
+			return
+		}
 		result, failed := processItem(searched, prevName)
+		if shouldStopMarketScan() {
+			log.Println("Scan: interrompido durante a fila principal")
+			return
+		}
 		if failed {
 			retryQueue = append(retryQueue, searched)
 			continue
@@ -552,7 +626,15 @@ func startMarketScan() {
 		isRetryPass = true
 		log.Printf("Scan: iniciando retry de %d item(ns): %v", len(retryQueue), retryQueue)
 		for _, searched := range retryQueue {
+			if shouldStopMarketScan() {
+				log.Println("Scan: interrompido antes de concluir a fila de retry")
+				return
+			}
 			result, _ := processItem(searched, prevName)
+			if shouldStopMarketScan() {
+				log.Println("Scan: interrompido durante a fila de retry")
+				return
+			}
 			if result == nil {
 				log.Printf("Scan: retry falhou para '%s', pulando", searched)
 				continue
@@ -569,10 +651,16 @@ func startMarketScan() {
 // prevName: nome do item anterior — se o nome capturado for igual, considera inválido e retenta.
 // retryClick: função a chamar para reabrir o item no retry (ClickFirstResult ou ClickSecondResult).
 func captureResult(searched, prevName string, retryClick func()) *ScanResult {
+	if shouldStopMarketScan() {
+		return nil
+	}
 	capturedName := searched
 	if GlobalScanner.HasNameCalib {
 		const maxAttempts = 2
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			if shouldStopMarketScan() {
+				return nil
+			}
 			n, err := GlobalScanner.CaptureItemName()
 			// Para comparar com o nome anterior, usamos o match estrito (normalizado)
 			// para evitar que itens parecidos mas diferentes fiquem presos num loop de retry.
@@ -596,6 +684,9 @@ func captureResult(searched, prevName string, retryClick func()) *ScanResult {
 		}
 	}
 
+	if shouldStopMarketScan() {
+		return nil
+	}
 	tiers, err := GlobalScanner.CapturePrices()
 	if err != nil {
 		log.Printf("Error scanning %s: %v", searched, err)
@@ -672,6 +763,8 @@ func nudgeAndRetry(retryClick func()) {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	LoadConfig() // Carrega calibrações salvas
+	unregisterStopHotkey := setupMarketStopHotkey()
+	defer unregisterStopHotkey()
 	wnd = g.NewMasterWindow("DofHunt", 380, 263, g.MasterWindowFlagsNotResizable|g.MasterWindowFlagsFrameless|g.MasterWindowFlagsFloating|g.MasterWindowFlagsTransparent)
 	wnd.SetTargetFPS(60)
 	wnd.SetBgColor(color.RGBA{0, 0, 0, 0})
